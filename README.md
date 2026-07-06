@@ -2,18 +2,17 @@
 
 A chess engine built in Java, developed as a STEM Academy capstone project at Essex High School
 between January 2023 and May 2025. The project spans 25,000+ lines of code and includes a
-graphical interface, full chess rule enforcement, and an AI opponent.
+graphical interface, full chess rule enforcement, and a chess engine.
 
 ## Features
 
 - Complete rule implementation including castling, en passant, and pawn promotion
-- AI opponent using [minimax with alpha-beta pruning / your algorithm]
-- Graphical interface built with [Swing / JavaFX]
-- [Any other notable features, e.g. move history, difficulty settings]
+- Chess engine / AI opponent utilizing an advanced alpha-beta algorithm with various optimizations and extensions (delta pruning, razoring, etc.)
+- Graphical interface built with Swing
 
 ## Requirements
 
-- Java [version, e.g. JDK 17+]
+- Java 25
 
 ## Running the Project
 
