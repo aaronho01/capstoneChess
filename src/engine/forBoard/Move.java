@@ -214,7 +214,7 @@ public abstract class Move {
     );
 
     hash = ZobristHashing.updateHashSideToMove(hash);
-
+    hash = clearCastlingRightsForMove(hash, this.board, this.movedPiece, this.getCurrentCoordinate());
     if (this.board.getEnPassantPawn() != null) {
       final int enPassantFile = this.board.getEnPassantPawn().getPiecePosition() % 8;
       hash = ZobristHashing.updateHashEnPassant(hash, enPassantFile);
@@ -600,36 +600,6 @@ public abstract class Move {
       return movedPiece.getPieceType() + disambiguationFile() + "x" +
               BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
     }
-
-    /**
-     * Updates the Zobrist hash for this major attack move.
-     *
-     * @param currentHash The current board hash.
-     * @return The updated hash.
-     */
-    @Override
-    protected long updateZobristHash(final long currentHash) {
-      long hash = ZobristHashing.updateHashPieceCapture(
-              currentHash,
-              this.getAttackedPiece()
-      );
-
-      hash = ZobristHashing.updateHashPieceMove(
-              hash,
-              this.movedPiece,
-              this.getCurrentCoordinate(),
-              this.getDestinationCoordinate()
-      );
-
-      hash = ZobristHashing.updateHashSideToMove(hash);
-
-      if (this.board.getEnPassantPawn() != null) {
-        final int enPassantFile = this.board.getEnPassantPawn().getPiecePosition() % 8;
-        hash = ZobristHashing.updateHashEnPassant(hash, enPassantFile);
-      }
-
-      return hash;
-    }
   }
 
   /**
@@ -765,36 +735,43 @@ public abstract class Move {
       return BoardUtils.getPositionAtCoordinate(this.movedPiece.getPiecePosition()).charAt(0) + "x" +
               BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
     }
+  }
 
-    /**
-     * Updates the Zobrist hash for this pawn attack move.
-     *
-     * @param currentHash The current board hash.
-     * @return The updated hash.
-     */
-    @Override
-    protected long updateZobristHash(final long currentHash) {
-      long hash = ZobristHashing.updateHashPieceCapture(
-              currentHash,
-              this.getAttackedPiece()
-      );
-
-      hash = ZobristHashing.updateHashPieceMove(
-              hash,
-              this.movedPiece,
-              this.getCurrentCoordinate(),
-              this.getDestinationCoordinate()
-      );
-
-      hash = ZobristHashing.updateHashSideToMove(hash);
-
-      if (this.board.getEnPassantPawn() != null) {
-        final int enPassantFile = this.board.getEnPassantPawn().getPiecePosition() % 8;
-        hash = ZobristHashing.updateHashEnPassant(hash, enPassantFile);
+  private static long clearCastlingRightsForMove(long hash, final Board board, final Piece movedPiece, final int fromPosition) {
+    if (movedPiece.getPieceType() == Piece.PieceType.KING) {
+      final boolean isWhite = movedPiece.getPieceAllegiance().isWhite();
+      if (isWhite) {
+        if (ZobristHashing.canCastle(board, true, true)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 0);
+        }
+        if (ZobristHashing.canCastle(board, true, false)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 1);
+        }
+      } else {
+        if (ZobristHashing.canCastle(board, false, true)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 2);
+        }
+        if (ZobristHashing.canCastle(board, false, false)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 3);
+        }
       }
-
-      return hash;
+    } else if (movedPiece.getPieceType() == Piece.PieceType.ROOK) {
+      final boolean isWhite = movedPiece.getPieceAllegiance().isWhite();
+      if (isWhite) {
+        if (fromPosition == 0 && ZobristHashing.canCastle(board, true, false)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 1);
+        } else if (fromPosition == 7 && ZobristHashing.canCastle(board, true, true)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 0);
+        }
+      } else {
+        if (fromPosition == 56 && ZobristHashing.canCastle(board, false, false)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 3);
+        } else if (fromPosition == 63 && ZobristHashing.canCastle(board, false, true)) {
+          hash = ZobristHashing.updateHashCastlingRight(hash, 2);
+        }
+      }
     }
+    return hash;
   }
 
   /**
@@ -876,22 +853,6 @@ public abstract class Move {
       builder.setZobristHash(newHash);
 
       return builder.build();
-    }
-
-    /**
-     * Updates the Zobrist hash for this en passant attack move.
-     *
-     * @param currentHash The current board hash.
-     * @return The updated hash.
-     */
-    @Override
-    protected long updateZobristHash(final long currentHash) {
-      long hash = super.updateZobristHash(currentHash);
-
-      final int enPassantFile = this.getAttackedPiece().getPiecePosition() % 8;
-      hash = ZobristHashing.updateHashEnPassant(hash, enPassantFile);
-
-      return hash;
     }
 
     /**
@@ -1138,17 +1099,17 @@ public abstract class Move {
 
       final boolean isWhite = this.movedPiece.getPieceAllegiance().isWhite();
       if (isWhite) {
-        if (this.board.whitePlayer().getPlayerKing().isKingSideCastleCapable()) {
+        if (ZobristHashing.canCastle(this.board, true, true)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 0);
         }
-        if (this.board.whitePlayer().getPlayerKing().isQueenSideCastleCapable()) {
+        if (ZobristHashing.canCastle(this.board, true, false)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 1);
         }
       } else {
-        if (this.board.blackPlayer().getPlayerKing().isKingSideCastleCapable()) {
+        if (ZobristHashing.canCastle(this.board, false, true)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 2);
         }
-        if (this.board.blackPlayer().getPlayerKing().isQueenSideCastleCapable()) {
+        if (ZobristHashing.canCastle(this.board, false, false)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 3);
         }
       }
@@ -1438,21 +1399,21 @@ public abstract class Move {
       );
 
       hash = ZobristHashing.updateHashSideToMove(hash);
-
+      hash = clearCastlingRightsForMove(hash, this.board, this.movedPiece, this.getCurrentCoordinate());
       if (this.attackedPiece.getPieceType() == Piece.PieceType.ROOK) {
         final boolean isWhiteRook = this.attackedPiece.getPieceAllegiance().isWhite();
         final int rookPosition = this.attackedPiece.getPiecePosition();
 
         if (isWhiteRook) {
-          if (rookPosition == 0 && this.board.whitePlayer().getPlayerKing().isQueenSideCastleCapable()) {
+          if (rookPosition == 0 && ZobristHashing.canCastle(this.board, true, false)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 1);
-          } else if (rookPosition == 7 && this.board.whitePlayer().getPlayerKing().isKingSideCastleCapable()) {
+          } else if (rookPosition == 7 && ZobristHashing.canCastle(this.board, true, true)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 0);
           }
         } else {
-          if (rookPosition == 56 && this.board.blackPlayer().getPlayerKing().isQueenSideCastleCapable()) {
+          if (rookPosition == 56 && ZobristHashing.canCastle(this.board, false, false)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 3);
-          } else if (rookPosition == 63 && this.board.blackPlayer().getPlayerKing().isKingSideCastleCapable()) {
+          } else if (rookPosition == 63 && ZobristHashing.canCastle(this.board, false, true)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 2);
           }
         }
@@ -1462,7 +1423,6 @@ public abstract class Move {
         final int enPassantFile = this.board.getEnPassantPawn().getPiecePosition() % 8;
         hash = ZobristHashing.updateHashEnPassant(hash, enPassantFile);
       }
-
       return hash;
     }
   }

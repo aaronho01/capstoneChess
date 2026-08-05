@@ -2,6 +2,7 @@ package engine.forBoard;
 
 import engine.Alliance;
 import engine.forPiece.Pawn;
+import engine.forPiece.King;
 import engine.forPiece.Piece;
 import engine.forPiece.Piece.PieceType;
 
@@ -101,16 +102,16 @@ public class ZobristHashing {
     if (board.currentPlayer().getAlliance() == Alliance.BLACK) {
       hash ^= SIDE_TO_MOVE;
     }
-    if (board.whitePlayer().getPlayerKing().isKingSideCastleCapable()) {
+    if (canCastle(board, true, true)) {
       hash ^= CASTLING_RIGHTS[0];
     }
-    if (board.whitePlayer().getPlayerKing().isQueenSideCastleCapable()) {
+    if (canCastle(board, true, false)) {
       hash ^= CASTLING_RIGHTS[1];
     }
-    if (board.blackPlayer().getPlayerKing().isKingSideCastleCapable()) {
+    if (canCastle(board, false, true)) {
       hash ^= CASTLING_RIGHTS[2];
     }
-    if (board.blackPlayer().getPlayerKing().isQueenSideCastleCapable()) {
+    if (canCastle(board, false, false)) {
       hash ^= CASTLING_RIGHTS[3];
     }
     final Pawn enPassantPawn = board.getEnPassantPawn();
@@ -119,6 +120,17 @@ public class ZobristHashing {
       hash ^= EN_PASSANT_FILE[enPassantFile];
     }
     return hash;
+  }
+
+  public static boolean canCastle(final Board board, final boolean isWhite, final boolean kingSide) {
+    final King king = isWhite ? board.whitePlayer().getPlayerKing() : board.blackPlayer().getPlayerKing();
+    if (!king.isFirstMove()) {
+      return false;
+    }
+    final int rookPosition = isWhite ? (kingSide ? 7 : 0) : (kingSide ? 63 : 56);
+    final Piece rook = board.getPiece(rookPosition);
+    return rook != null && rook.getPieceType() == Piece.PieceType.ROOK &&
+            rook.getPieceAllegiance() == king.getPieceAllegiance() && rook.isFirstMove();
   }
 
   /**
