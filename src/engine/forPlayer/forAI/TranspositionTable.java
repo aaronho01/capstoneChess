@@ -1,5 +1,7 @@
 package engine.forPlayer.forAI;
 
+import engine.forBoard.Move;
+
 /**
  * The TranspositionTable class provides a hash table implementation for storing previously evaluated
  * chess positions during search operations. This optimization technique allows the chess engine to
@@ -23,7 +25,7 @@ public class TranspositionTable {
    * The Entry class represents a single record in the transposition table containing
    * all necessary information about a previously evaluated chess position. Each entry
    * stores the position hash, evaluation score, search depth, node classification,
-   * and age information for efficient retrieval and replacement strategies.
+   * best move, and age information for efficient retrieval and replacement strategies.
    */
   static class Entry {
 
@@ -42,10 +44,13 @@ public class TranspositionTable {
     /** The age of this entry used for replacement policy decisions. */
     byte age;
 
+    /** The best move found for this position, or null if none was recorded. */
+    Move move;
+
     /**
      * Constructs a new Entry with default values for all fields.
      * Initializes the entry with zero values for the hash key, score, depth,
-     * node type, and age, representing an empty or uninitialized table slot.
+     * node type, and age, and a null move, representing an empty or uninitialized table slot.
      */
     Entry() {
       this.key = 0L;
@@ -53,6 +58,7 @@ public class TranspositionTable {
       this.depth = 0;
       this.nodeType = 0;
       this.age = 0;
+      this.move = null;
     }
   }
 

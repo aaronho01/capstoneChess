@@ -69,7 +69,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           new Move[2][MAX_SEARCH_DEPTH]);
 
   /** Countermove table for storing responses to opponent moves for improved move ordering. */
-  private final Move[][] counterMoves = new Move[64][64];
+  @SuppressWarnings("unchecked")
+  private final AtomicReference<Move>[][] counterMoves = new AtomicReference[64][64];
 
   /** The maximum number of quiescence search nodes allowed per search. */
   private static final int MAX_QUIESCENCE = 300000;
@@ -148,7 +149,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           if (lastMove != null && lastMove != MoveFactory.getNullMove() &&
                   lastMove.getCurrentCoordinate() >= 0 && lastMove.getDestinationCoordinate() >= 0 &&
                   lastMove.getCurrentCoordinate() < 64 && lastMove.getDestinationCoordinate() < 64) {
-            isCounter = move.equals(engine.counterMoves[lastMove.getCurrentCoordinate()][lastMove.getDestinationCoordinate()]);
+            isCounter = move.equals(engine.counterMoves[lastMove.getCurrentCoordinate()][lastMove.getDestinationCoordinate()].get());
           }
           isCounterMap.put(move, isCounter);
         }
@@ -296,6 +297,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     this.searchThreadPool = Executors.newFixedThreadPool(threadCount);
     this.transpositionTable = new StripedTranspositionTable(256);
     this.evaluator = determineGameState(board);
+
+    for (int i = 0; i < 64; i++) {
+      for (int j = 0; j < 64; j++) {
+        counterMoves[i][j] = new AtomicReference<>();
+      }
+    }
   }
 
   /**
@@ -332,7 +339,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         if (currentDepth >= 3) {
           bestMove = searchRootAspirationWindow(board, currentDepth, bestMove);
         } else {
-          bestMove = searchRootParallel(board, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE);
+          bestMove = searchRootParallel(board, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
         }
 
         updateHistoryHeuristic(bestMove, currentDepth);
@@ -351,6 +358,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         notifyObservers(result);
       }
     } finally {
+      searchThreadPool.shutdown();
     }
 
     return bestMove;
@@ -388,12 +396,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     double beta = depth > 3 ? lowestSeenValue + ASPIRATION_WINDOW : Double.MAX_VALUE;
     Move bestMove;
 
-    bestMove = searchRootParallel(board, depth, alpha, beta);
+    bestMove = searchRootParallel(board, depth, alpha, beta, previousBestMove);
 
     if ((board.currentPlayer().getAlliance().isWhite() && highestSeenValue <= alpha) ||
             (!board.currentPlayer().getAlliance().isWhite() && lowestSeenValue >= beta)) {
       System.out.println("Aspiration window failed, re-searching with full window");
-      bestMove = searchRootParallel(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE);
+      bestMove = searchRootParallel(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, previousBestMove);
     }
 
     return bestMove;
@@ -409,12 +417,19 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * @param beta The beta bound for alpha-beta search.
    * @return The best move found by the parallel search.
    */
-  private Move searchRootParallel(final Board board, final int depth, double alpha, double beta) {
+  private Move searchRootParallel(final Board board, final int depth, double alpha, double beta,
+                                  final Move previousBestMove) {
     final List<Move> allMoves = new ArrayList<>(
             MoveSorter.EXPENSIVE.sort(board.currentPlayer().getLegalMoves(), board, this, 0));
 
     if (allMoves.isEmpty()) {
       return MoveFactory.getNullMove();
+    }
+
+    if (previousBestMove != null && previousBestMove != MoveFactory.getNullMove() &&
+            allMoves.contains(previousBestMove)) {
+      allMoves.remove(previousBestMove);
+      allMoves.add(0, previousBestMove);
     }
 
     final AtomicReference<Move> globalBestMove = new AtomicReference<>(allMoves.get(0));
@@ -470,7 +485,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       try {
         future.get();
       } catch (Exception e) {
-        e.printStackTrace();
+        System.err.println("Search worker thread failed: " + e);
       }
     }
 
@@ -556,40 +571,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private void recordCounterMove(Board board, Move move) {
     Move lastMove = board.getTransitionMove();
     if (lastMove != null && lastMove != MoveFactory.getNullMove()) {
-      counterMoves[lastMove.getCurrentCoordinate()][lastMove.getDestinationCoordinate()] = move;
+      counterMoves[lastMove.getCurrentCoordinate()][lastMove.getDestinationCoordinate()].set(move);
     }
-  }
-
-  /**
-   * Calculates the appropriate depth for quiescence search based on position activity
-   * and current search constraints.
-   *
-   * @param toBoard The board position to evaluate.
-   * @param depth The current search depth.
-   * @return The depth to use for quiescence search.
-   */
-  private int calculateQuiescenceDepth(final Board toBoard, final int depth) {
-    SearchStats stats = threadStats.get();
-
-    if (depth == 1 && stats.quiescenceCount < MAX_QUIESCENCE) {
-      int activityMeasure = 0;
-
-      if (toBoard.currentPlayer().isInCheck()) {
-        return 1;
-      }
-
-      for (final Move move : BoardUtils.lastNMoves(toBoard, 2)) {
-        if (move.isAttack()) {
-          activityMeasure += 1;
-        }
-      }
-
-      if (activityMeasure >= 1) {
-        stats.quiescenceCount++;
-        return 1;
-      }
-    }
-    return depth - 1;
   }
 
   /**
@@ -605,6 +588,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    */
   private double max(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
+    stats.boardsEvaluated++;
 
     if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, true) :
@@ -648,12 +632,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    Move ttMove = null;
-    if (entry == null && depth >= 4) {
+    Move ttMove = entry != null ? entry.move : null;
+    if (ttMove == null && depth >= 4) {
       max(board, depth - 2, alpha, beta, ply);
       entry = transpositionTable.get(zobristHash);
       if (entry != null) {
-        ttMove = findMoveFromHash(board, entry);
+        ttMove = entry.move;
       }
     }
 
@@ -746,7 +730,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
               historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
             }
 
-            transpositionTable.store(zobristHash, beta, depth, TranspositionTable.LOWERBOUND);
+            transpositionTable.store(zobristHash, beta, depth, TranspositionTable.LOWERBOUND, bestFoundMove);
             return beta;
           }
         }
@@ -762,7 +746,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (currentAlpha >= beta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, currentAlpha, depth, nodeType);
+    transpositionTable.store(zobristHash, currentAlpha, depth, nodeType, bestFoundMove);
 
     return currentAlpha;
   }
@@ -780,6 +764,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    */
   private double min(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
+    stats.boardsEvaluated++;
 
     if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, false) :
@@ -823,12 +808,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    Move ttMove = null;
-    if (entry == null && depth >= 4) {
+    Move ttMove = entry != null ? entry.move : null;
+    if (ttMove == null && depth >= 4) {
       min(board, depth - 2, alpha, beta, ply);
       entry = transpositionTable.get(zobristHash);
       if (entry != null) {
-        ttMove = findMoveFromHash(board, entry);
+        ttMove = entry.move;
       }
     }
 
@@ -921,7 +906,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
               historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
             }
 
-            transpositionTable.store(zobristHash, alpha, depth, TranspositionTable.UPPERBOUND);
+            transpositionTable.store(zobristHash, alpha, depth, TranspositionTable.UPPERBOUND, bestFoundMove);
             return alpha;
           }
         }
@@ -937,7 +922,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (currentBeta >= beta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, currentBeta, depth, nodeType);
+    transpositionTable.store(zobristHash, currentBeta, depth, nodeType, bestFoundMove);
 
     return currentBeta;
   }
@@ -960,6 +945,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     if (searchStopped) {
       return getCachedEvaluation(board, 0);
     }
+
+    if (stats.quiescenceCount >= MAX_QUIESCENCE) {
+      return getCachedEvaluation(board, 0);
+    }
+    stats.quiescenceCount++;
 
     long zobristHash = board.getZobristHash();
     TranspositionTable.Entry entry = transpositionTable.get(zobristHash);
@@ -987,13 +977,13 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (maximizing) {
       if (standPat >= beta) {
-        transpositionTable.store(zobristHash, beta, 0, TranspositionTable.LOWERBOUND);
+        transpositionTable.store(zobristHash, beta, 0, TranspositionTable.LOWERBOUND, null);
         return beta;
       }
       if (standPat > alpha) alpha = standPat;
     } else {
       if (standPat <= alpha) {
-        transpositionTable.store(zobristHash, alpha, 0, TranspositionTable.UPPERBOUND);
+        transpositionTable.store(zobristHash, alpha, 0, TranspositionTable.UPPERBOUND, null);
         return alpha;
       }
       if (standPat < beta) beta = standPat;
@@ -1056,7 +1046,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
         if (alpha >= beta) {
           transpositionTable.store(zobristHash, maximizing ? beta : alpha, 0,
-                  maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND);
+                  maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND, null);
           return maximizing ? beta : alpha;
         }
       }
@@ -1069,29 +1059,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (finalScore >= originalBeta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, finalScore, 0, nodeType);
+    transpositionTable.store(zobristHash, finalScore, 0, nodeType, null);
     return finalScore;
-  }
-
-  /**
-   * Attempts to find a specific move from a transposition table entry.
-   * This is a simplified implementation that searches for matching board positions.
-   *
-   * @param board The current board position.
-   * @param entry The transposition table entry.
-   * @return The move corresponding to the entry, or null if not found.
-   */
-  private Move findMoveFromHash(Board board, TranspositionTable.Entry entry) {
-    for (Move move : board.currentPlayer().getLegalMoves()) {
-      MoveTransition moveTransition = board.currentPlayer().makeMove(move);
-      if (moveTransition.moveStatus().isDone()) {
-        Board newBoard = moveTransition.toBoard();
-        if (newBoard.getZobristHash() == entry.key) {
-          return move;
-        }
-      }
-    }
-    return null;
   }
 
   /**
@@ -1219,7 +1188,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     /**
      * Increments the age counter for entry replacement decisions.
      */
-    public void incrementAge() {
+    public synchronized void incrementAge() {
       currentAge++;
       if (currentAge == 0) {
         currentAge = 1;
@@ -1265,7 +1234,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
      * @param depth The search depth for the evaluation.
      * @param nodeType The type of node (exact, lower bound, upper bound).
      */
-    public void store(long zobristHash, double score, int depth, byte nodeType) {
+    public void store(long zobristHash, double score, int depth, byte nodeType, Move bestMove) {
       int index = (int) (zobristHash & mask);
 
       ReadWriteLock lock = getLock(zobristHash);
@@ -1283,6 +1252,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         target.depth = (short) depth;
         target.nodeType = nodeType;
         target.age = currentAge;
+        target.move = bestMove;
       } finally {
         lock.writeLock().unlock();
       }
