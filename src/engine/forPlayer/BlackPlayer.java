@@ -28,18 +28,18 @@ import static engine.forPiece.Piece.PieceType.ROOK;
 public final class BlackPlayer extends Player {
 
   /**
-   * Constructs a new BlackPlayer with the specified board and legal move collections.
-   * Initializes the player with access to the current board state and legal moves
-   * for both black and white players to enable proper move validation and calculation.
+   * Constructs a new BlackPlayer with the specified board, black's standard legal moves,
+   * and white's active pieces. Initializes the player with access to the current board
+   * state and uses white's pieces directly to test check and castling safety.
    *
    * @param board The current chess board state.
-   * @param whiteStandardLegals Collection of legal moves for the white player.
    * @param blackStandardLegals Collection of legal moves for the black player.
+   * @param whitePieces Collection of white's active pieces, used to test check and castling safety.
    */
   public BlackPlayer(final Board board,
-                     final Collection<Move> whiteStandardLegals,
-                     final Collection<Move> blackStandardLegals) {
-    super(board, blackStandardLegals, whiteStandardLegals);
+                     final Collection<Move> blackStandardLegals,
+                     final Collection<Piece> whitePieces) {
+    super(board, blackStandardLegals, whitePieces);
   }
 
   /**
@@ -50,12 +50,12 @@ public final class BlackPlayer extends Player {
    * kingside and queenside castling moves when legal.
    *
    * @param playerLegals Collection of legal moves for the black player.
-   * @param opponentLegals Collection of legal moves for the white player.
+   * @param opponentPieces Collection of pieces for the white player.
    * @return Collection of legal castling moves, or empty collection if none available.
    */
   @Override
   protected Collection<Move> calculateKingCastles(final Collection<Move> playerLegals,
-                                                  final Collection<Move> opponentLegals) {
+                                                  final Collection<Piece> opponentPieces) {
     if (!hasCastleOpportunities()) {
       return Collections.emptyList();
     }
@@ -64,8 +64,8 @@ public final class BlackPlayer extends Player {
       if (this.board.getPiece(5) == null && this.board.getPiece(6) == null) {
         final Piece kingSideRook = this.board.getPiece(7);
         if (kingSideRook != null && kingSideRook.isFirstMove() &&
-                Player.calculateAttacksOnTile(5, opponentLegals).isEmpty() &&
-                Player.calculateAttacksOnTile(6, opponentLegals).isEmpty() &&
+                !Player.isSquareAttacked(5, opponentPieces, this.board) &&
+                !Player.isSquareAttacked(6, opponentPieces, this.board) &&
                 kingSideRook.getPieceType() == ROOK) {
           if (BoardUtils.isKingPawnTrap(this.board, this.playerKing, 12)) {
             kingCastles.add(MovePool.INSTANCE.getKingSideCastleMove(this.board, this.playerKing, 6, (Rook) kingSideRook, kingSideRook.getPiecePosition(), 5));
@@ -76,8 +76,8 @@ public final class BlackPlayer extends Player {
               this.board.getPiece(3) == null) {
         final Piece queenSideRook = this.board.getPiece(0);
         if (queenSideRook != null && queenSideRook.isFirstMove() &&
-                Player.calculateAttacksOnTile(2, opponentLegals).isEmpty() &&
-                Player.calculateAttacksOnTile(3, opponentLegals).isEmpty() &&
+                !Player.isSquareAttacked(2, opponentPieces, this.board) &&
+                !Player.isSquareAttacked(3, opponentPieces, this.board) &&
                 queenSideRook.getPieceType() == ROOK) {
           if (BoardUtils.isKingPawnTrap(this.board, this.playerKing, 12)) {
             kingCastles.add(MovePool.INSTANCE.getQueenSideCastleMove(this.board, this.playerKing, 2, (Rook) queenSideRook, queenSideRook.getPiecePosition(), 3));

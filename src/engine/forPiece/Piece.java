@@ -132,6 +132,19 @@ public abstract class Piece {
   public abstract Collection < Move > calculateLegalMoves(final Board board);
 
   /**
+   * Determines whether this piece attacks the given square on the given board, without
+   * allocating any {@link Move} objects. This mirrors exactly the destinations {@link
+   * #calculateLegalMoves(Board)} would produce for this piece, but stops as soon as the target
+   * square is confirmed or ruled out, so it is far cheaper than generating and filtering the
+   * full move list when only one square's status is in question.
+   *
+   * @param targetSquare The square to test.
+   * @param board The current board.
+   * @return True if this piece attacks targetSquare, false otherwise.
+   */
+  public abstract boolean attacksSquare(final int targetSquare, final Board board);
+
+  /**
    * Overrides the `equals` method to compare two pieces for equality.
    *
    * @param other The object to compare with.

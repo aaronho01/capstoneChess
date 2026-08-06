@@ -94,8 +94,8 @@ public final class Board {
     this.enPassantPawn = builder.enPassantPawn;
     final Collection<Move> whiteStandardMoves = calculateLegalMoves(this.whitePieces);
     final Collection<Move> blackStandardMoves = calculateLegalMoves(this.blackPieces);
-    this.whitePlayer = new WhitePlayer(this, whiteStandardMoves, blackStandardMoves);
-    this.blackPlayer = new BlackPlayer(this, whiteStandardMoves, blackStandardMoves);
+    this.whitePlayer = new WhitePlayer(this, whiteStandardMoves, this.blackPieces);
+    this.blackPlayer = new BlackPlayer(this, blackStandardMoves, this.whitePieces);
     this.currentPlayer = builder.nextMoveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
     this.transitionMove = builder.transitionMove != null ? builder.transitionMove : getNullMove();
     this.zobristHash = builder.zobristHash != 0 ? builder.zobristHash :
@@ -353,8 +353,8 @@ public final class Board {
   private void refreshPlayers(final Alliance moveMaker) {
     final Collection<Move> whiteStandardMoves = calculateLegalMoves(this.whitePieces);
     final Collection<Move> blackStandardMoves = calculateLegalMoves(this.blackPieces);
-    this.whitePlayer = new WhitePlayer(this, whiteStandardMoves, blackStandardMoves);
-    this.blackPlayer = new BlackPlayer(this, whiteStandardMoves, blackStandardMoves);
+    this.whitePlayer = new WhitePlayer(this, whiteStandardMoves, this.blackPieces);
+    this.blackPlayer = new BlackPlayer(this, blackStandardMoves, this.whitePieces);
     this.currentPlayer = moveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
   }
 

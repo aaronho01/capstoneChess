@@ -111,6 +111,29 @@ public final class Knight extends Piece {
   }
 
   /**
+   * Determines whether this knight attacks the given square, using the same precomputed
+   * offsets as {@link #calculateLegalMoves(Board)} but without allocating any moves.
+   *
+   * @param targetSquare The square to test.
+   * @param board The current board.
+   * @return True if this knight attacks targetSquare, false otherwise.
+   */
+  @Override
+  public boolean attacksSquare(final int targetSquare, final Board board) {
+    final int[] candidates = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
+    if (candidates == null) {
+      return false;
+    }
+    for (final int candidateDestinationCoordinate : candidates) {
+      if (candidateDestinationCoordinate == targetSquare) {
+        final Piece pieceAtDestination = board.getPiece(targetSquare);
+        return pieceAtDestination == null || pieceAtDestination.getPieceAllegiance() != this.pieceAlliance;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Calculates the location bonus for the knight based on its position on the board.
    *
    * @param board The current board state.

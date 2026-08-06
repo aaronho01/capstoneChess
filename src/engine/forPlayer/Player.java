@@ -39,19 +39,19 @@ public abstract class Player {
   protected final boolean isInCheck;
 
   /**
-   * Constructs a Player with the specified board and move collections.
-   * Establishes the player's king, determines check status, and calculates all legal moves
-   * including castling options.
+   * Constructs a Player with the specified board, this player's standard legal moves, and the
+   * opponent's active pieces. Establishes the player's king, determines check status directly
+   * against the opponent's pieces, and calculates all legal moves including castling options.
    *
    * @param board The chessboard associated with this player.
    * @param playerLegals The collection of standard legal moves for this player.
-   * @param opponentLegals The collection of legal moves for the opponent player.
+   * @param opponentPieces The opponent's active pieces, used to test check and castling safety.
    */
-  Player(final Board board, final Collection<Move> playerLegals, final Collection<Move> opponentLegals) {
+  Player(final Board board, final Collection<Move> playerLegals, final Collection<Piece> opponentPieces) {
     this.board = board;
     this.playerKing = establishKing();
-    this.isInCheck = !calculateAttacksOnTile(this.playerKing.getPiecePosition(), opponentLegals).isEmpty();
-    playerLegals.addAll(calculateKingCastles(playerLegals, opponentLegals));
+    this.isInCheck = isSquareAttacked(this.playerKing.getPiecePosition(), opponentPieces, board);
+    playerLegals.addAll(calculateKingCastles(playerLegals, opponentPieces));
     this.legalMoves = Collections.unmodifiableCollection(playerLegals);
   }
 
@@ -149,6 +149,25 @@ public abstract class Player {
   }
 
   /**
+   * Determines whether any piece in the given collection attacks the given square on the given
+   * board, using {@link Piece#attacksSquare(int, Board)} rather than generating and filtering a
+   * full move list, since only a yes/no answer for one square is needed here.
+   *
+   * @param square The square to test.
+   * @param attackers The candidate attacking pieces.
+   * @param board The current board.
+   * @return True if any piece in attackers attacks square, false otherwise.
+   */
+  public static boolean isSquareAttacked(final int square, final Collection<Piece> attackers, final Board board) {
+    for (final Piece piece : attackers) {
+      if (piece.attacksSquare(square, board)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Executes a move and returns the resulting board transition.
    * Validates the move legality and ensures the move does not leave the player in check.
    *
@@ -204,10 +223,10 @@ public abstract class Player {
    * Must be implemented by concrete subclasses to handle alliance-specific castling rules.
    *
    * @param playerLegals The legal moves available to this player.
-   * @param opponentLegals The legal moves available to the opponent.
+   * @param opponentPieces The opposing player's pieces.
    * @return A collection of possible castling moves.
    */
-  protected abstract Collection<Move> calculateKingCastles(Collection<Move> playerLegals, Collection<Move> opponentLegals);
+  protected abstract Collection<Move> calculateKingCastles(Collection<Move> playerLegals, Collection<Piece> opponentPieces);
 
   /**
    * Determines whether this player has any castling opportunities available.

@@ -125,6 +125,38 @@ public final class Bishop extends Piece {
   }
 
   /**
+   * Determines whether this bishop attacks the given square, walking the same precomputed
+   * diagonal lines as {@link #calculateLegalMoves(Board)} but without allocating any moves.
+   *
+   * @param targetSquare The square to test.
+   * @param board The current board.
+   * @return True if this bishop attacks targetSquare, false otherwise.
+   */
+  @Override
+  public boolean attacksSquare(final int targetSquare, final Board board) {
+    final Line[] lines = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
+    if (lines == null) {
+      return false;
+    }
+    for (final Line line : lines) {
+      for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
+        final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
+        if (pieceAtDestination == null) {
+          if (candidateDestinationCoordinate == targetSquare) {
+            return true;
+          }
+        } else {
+          if (candidateDestinationCoordinate == targetSquare) {
+            return pieceAtDestination.getPieceAllegiance() != this.pieceAlliance;
+          }
+          break;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
    * Calculates the positional bonus for this bishop based on its current location.
    * The bonus value is determined by alliance-specific position tables that favor
    * certain squares for optimal bishop placement.

@@ -166,6 +166,30 @@ public final class King extends Piece {
   }
 
   /**
+   * Determines whether this king attacks the given square, using the same precomputed
+   * offsets as {@link #calculateLegalMoves(Board)} but without allocating any moves.
+   *
+   * @param targetSquare The square to test.
+   * @param board The current board.
+   * @return True if this king attacks targetSquare, false otherwise.
+   */
+  @Override
+  public boolean attacksSquare(final int targetSquare, final Board board) {
+    final int[] candidates = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
+    if (candidates == null) {
+      return false;
+    }
+    for (final int currentCandidateOffset : candidates) {
+      final int candidateDestinationCoordinate = this.piecePosition + currentCandidateOffset;
+      if (candidateDestinationCoordinate == targetSquare) {
+        final Piece pieceAtDestination = board.getPiece(targetSquare);
+        return pieceAtDestination == null || pieceAtDestination.getPieceAllegiance() != this.pieceAlliance;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Returns the string representation of this king piece.
    *
    * @return The piece type string representation.

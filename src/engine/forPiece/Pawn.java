@@ -179,6 +179,31 @@ public final class Pawn extends Piece {
   }
 
   /**
+   * Determines whether this pawn attacks the given square. Unlike {@link
+   * #calculateLegalMoves(Board)}, occupancy of the target square is irrelevant here: a pawn
+   * guards its diagonal squares whether or not anything is standing on them, which matters for
+   * king safety and castling even though no move gets generated onto an empty diagonal square.
+   *
+   * @param targetSquare The square to test.
+   * @param board The current board.
+   * @return True if this pawn attacks targetSquare, false otherwise.
+   */
+  @Override
+  public boolean attacksSquare(final int targetSquare, final Board board) {
+    final int candidateSeven = this.piecePosition + (this.pieceAlliance.getDirection() * 7);
+    if (candidateSeven == targetSquare && BoardUtils.isValidTileCoordinate(candidateSeven) &&
+            !((BoardUtils.Instance.EighthColumn.get(this.piecePosition) && this.pieceAlliance.isWhite()) ||
+                    (BoardUtils.Instance.FirstColumn.get(this.piecePosition) && this.pieceAlliance.isBlack()))) {
+      return true;
+    }
+
+    final int candidateNine = this.piecePosition + (this.pieceAlliance.getDirection() * 9);
+      return candidateNine == targetSquare && BoardUtils.isValidTileCoordinate(candidateNine) &&
+              !((BoardUtils.Instance.FirstColumn.get(this.piecePosition) && this.pieceAlliance.isWhite()) ||
+                      (BoardUtils.Instance.EighthColumn.get(this.piecePosition) && this.pieceAlliance.isBlack()));
+  }
+
+  /**
    * Returns the string representation of this pawn piece.
    *
    * @return The string representation of the pawn piece type.

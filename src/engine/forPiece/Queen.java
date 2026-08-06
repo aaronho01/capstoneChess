@@ -124,6 +124,38 @@ public final class Queen extends Piece {
   }
 
   /**
+   * Determines whether this queen attacks the given square, walking the same precomputed
+   * lines as {@link #calculateLegalMoves(Board)} but without allocating any moves.
+   *
+   * @param targetSquare The square to test.
+   * @param board The current board.
+   * @return True if this queen attacks targetSquare, false otherwise.
+   */
+  @Override
+  public boolean attacksSquare(final int targetSquare, final Board board) {
+    final MoveUtils.Line[] lines = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
+    if (lines == null) {
+      return false;
+    }
+    for (final MoveUtils.Line line : lines) {
+      for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
+        final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
+        if (pieceAtDestination == null) {
+          if (candidateDestinationCoordinate == targetSquare) {
+            return true;
+          }
+        } else {
+          if (candidateDestinationCoordinate == targetSquare) {
+            return pieceAtDestination.getPieceAllegiance() != this.pieceAlliance;
+          }
+          break;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
    * Calculates and returns the positional bonus value for the queen at its current location.
    * The bonus is determined by the alliance-specific evaluation function which considers
    * strategic factors such as centralization and development timing.
