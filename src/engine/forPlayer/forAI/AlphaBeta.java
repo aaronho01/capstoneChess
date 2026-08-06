@@ -606,9 +606,13 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double max(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
 
-    if (depth <= 0 || BoardUtils.isEndOfGame(board) || searchStopped) {
+    if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, true) :
               getCachedEvaluation(board, depth);
+    }
+
+    if (depth <= 0) {
+      return quiescenceSearch(board, alpha, beta, ply, true);
     }
 
     long zobristHash = board.getZobristHash();
@@ -624,6 +628,10 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       if (alpha >= beta) {
         return entry.score;
       }
+    }
+
+    if (BoardUtils.isEndOfGame(board)) {
+      return getCachedEvaluation(board, depth);
     }
 
     if (depth == 1) {
@@ -773,9 +781,13 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double min(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
 
-    if (depth <= 0 || BoardUtils.isEndOfGame(board) || searchStopped) {
+    if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, false) :
               getCachedEvaluation(board, depth);
+    }
+
+    if (depth <= 0) {
+      return quiescenceSearch(board, alpha, beta, ply, false);
     }
 
     long zobristHash = board.getZobristHash();
@@ -791,6 +803,10 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       if (alpha >= beta) {
         return entry.score;
       }
+    }
+
+    if (BoardUtils.isEndOfGame(board)) {
+      return getCachedEvaluation(board, depth);
     }
 
     if (depth == 1) {
@@ -941,7 +957,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
 
-    if (BoardUtils.isEndOfGame(board) || searchStopped) {
+    if (searchStopped) {
+      return getCachedEvaluation(board, 0);
+    } if (BoardUtils.isEndOfGame(board)) {
       return getCachedEvaluation(board, 0);
     }
 
