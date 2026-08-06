@@ -24,6 +24,12 @@ import java.util.TreeMap;
  * repeating the process inside that branch narrows the fault to a single position. A Zobrist
  * consistency walk is provided alongside these, since the incrementally updated hash carried by each
  * board can be checked against a hash recalculated from scratch at every node of the same tree.
+ * <p>
+ * {@link #perftMakeUnmake(Board, int)} walks the same tree through {@link Board#makeMove(Move)} and
+ * {@link Board#unmakeMove()} on a single mutated board rather than building a new board per move.
+ * It exists to validate that mutating path: running it alongside {@link #perft(Board, int)} on the
+ * same position and depth, and any difference in node count means the mutating path is leaving the
+ * board in a different state than the immutable path would have produced.
  * This class is designed as a non-instantiable utility class with static methods.
  *
  * @author Aaron Ho
@@ -66,6 +72,40 @@ public class Perft {
         continue;
       }
       nodes += depth == 1 ? 1L : perft(transition.toBoard(), depth - 1);
+    }
+    return nodes;
+  }
+
+  /**
+   * Counts the leaf nodes reachable from the given position at exactly the given depth, the same
+   * as {@link #perft(Board, int)}, but by mutating a single board in place through
+   * {@link Board#makeMove(Move)} and {@link Board#unmakeMove()} instead of building a new board
+   * for every move. A depth of zero counts the given position itself as a single node.
+   * <p>
+   * Legality is established the same way {@link BoardUtils#kingThreat(Move)} establishes it
+   * elsewhere in this engine: a move is applied, and then rejected if it leaves the player who
+   * just moved in check. The given board is restored to its original state before this method
+   * returns, whether it completes normally or throws, since the unmake happens in a finally block.
+   *
+   * @param board The position from which to count. Mutated during the walk and restored before
+   *              this method returns.
+   * @param depth The number of plies to walk before counting.
+   * @return The number of leaf nodes at the requested depth.
+   */
+  public static long perftMakeUnmake(final Board board, final int depth) {
+    if (depth <= 0) {
+      return 1L;
+    }
+    long nodes = 0L;
+    for (final Move move : board.currentPlayer().getLegalMoves()) {
+      board.makeMove(move);
+      try {
+        if (!board.currentPlayer().getOpponent().isInCheck()) {
+          nodes += depth == 1 ? 1L : perftMakeUnmake(board, depth - 1);
+        }
+      } finally {
+        board.unmakeMove();
+      }
     }
     return nodes;
   }

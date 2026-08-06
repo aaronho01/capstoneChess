@@ -16,49 +16,65 @@ import static engine.forBoard.Move.MoveFactory.getNullMove;
  * and players, and calculating legal moves. The board keeps track of white and black pieces,
  * the current player, en passant opportunities, and the transition move that created the current state.
  * <p>
- * This class is immutable - after creation, the board state cannot be modified.
- * Instead, moves create new Board instances with updated states.
+ * A board built through {@link Builder} still behaves as a fixed snapshot in the sense that
+ * nothing else mutates it implicitly. In addition, a board now supports being mutated in place
+ * through {@link #makeMove(Move)} and {@link #unmakeMove()}, which relocate pieces and update
+ * state directly rather than constructing a new Board instance, pushing an undo record onto an
+ * internal stack so the change can be exactly reversed. This mutating path exists for
+ * performance-critical callers such as search and perft; callers that still want an immutable
+ * transition should continue to use {@link Move#execute()}.
  *
  * @author Aaron Ho
  * @author dareTo81
  */
 public final class Board {
 
-  /**
-   * A map representing the configuration of pieces on the board.
-   * The keys are tile coordinates, and the values are the corresponding pieces.
-   */
-  private final Map<Integer, Piece> boardConfig;
+  /** A mutable map representing the configuration of pieces on the board, keyed by tile coordinate. */
+  private Map<Integer, Piece> boardConfig;
 
-  /** A collection of white pieces currently present on the board. */
-  private final Collection<Piece> whitePieces;
+  /** The white pieces currently on the board. Kept in sync with boardConfig by placePiece/removePiece. */
+  private List<Piece> whitePieces;
 
-  /** A collection of black pieces currently present on the board. */
-  private final Collection<Piece> blackPieces;
+  /** The black pieces currently on the board. Kept in sync with boardConfig by placePiece/removePiece. */
+  private List<Piece> blackPieces;
 
-  /** The player controlling the white pieces on the board. */
-  private final WhitePlayer whitePlayer;
+  /** The player controlling the white pieces on the board. Rebuilt whenever the board is mutated. */
+  private WhitePlayer whitePlayer;
 
-  /** The player controlling the black pieces on the board. */
-  private final BlackPlayer blackPlayer;
+  /** The player controlling the black pieces on the board. Rebuilt whenever the board is mutated. */
+  private BlackPlayer blackPlayer;
 
-  /** The player whose turn it currently is to make a move. */
-  public final Player currentPlayer;
+  /** The player whose turn it currently is to move. */
+  public Player currentPlayer;
 
   /**
    * The pawn that is susceptible to en passant capture in the current position.
    * Null if no en passant opportunity exists.
    */
-  private final Pawn enPassantPawn;
+  private Pawn enPassantPawn;
 
   /**
    * The move that resulted in the current board position.
-   * Returns a null move if this is the initial board position.
+   * A null move if this is the initial board position.
    */
-  private final Move transitionMove;
+  private Move transitionMove;
 
   /** The Zobrist hash value for this board position, used for position identification. */
-  private final long zobristHash;
+  private long zobristHash;
+
+  /** The number of plies since the last pawn move or capture, tracked for the fifty-move rule. */
+  private int halfMoveClock;
+
+  /** The undo records for moves applied through {@link #makeMove(Move)} but not yet unmade. */
+  private final Deque<UndoState> undoStack = new ArrayDeque<>();
+
+  /**
+   * A running count of how many times each Zobrist hash has been reached along the current
+   * make/unmake path, maintained by {@link #makeMove(Move)} and {@link #unmakeMove()} for
+   * threefold repetition detection. This tracks repetition only along this board instance's own
+   * make/unmake path, not a full game history supplied from outside it.
+   */
+  private final Map<Long, Integer> positionCounts = new HashMap<>();
 
   /**
    * A pre-constructed standard chess board configuration representing the starting position.
@@ -72,9 +88,9 @@ public final class Board {
    * @param builder The builder object containing board configuration details.
    */
   private Board(final Builder builder) {
-    this.boardConfig = Collections.unmodifiableMap(builder.BoardConfigurations);
-    this.whitePieces = calculateActivePieces(builder, Alliance.WHITE);
-    this.blackPieces = calculateActivePieces(builder, Alliance.BLACK);
+    this.boardConfig = new HashMap<>(builder.BoardConfigurations);
+    this.whitePieces = new ArrayList<>(calculateActivePieces(builder, Alliance.WHITE));
+    this.blackPieces = new ArrayList<>(calculateActivePieces(builder, Alliance.BLACK));
     this.enPassantPawn = builder.enPassantPawn;
     final Collection<Move> whiteStandardMoves = calculateLegalMoves(this.whitePieces);
     final Collection<Move> blackStandardMoves = calculateLegalMoves(this.blackPieces);
@@ -84,6 +100,8 @@ public final class Board {
     this.transitionMove = builder.transitionMove != null ? builder.transitionMove : getNullMove();
     this.zobristHash = builder.zobristHash != 0 ? builder.zobristHash :
             ZobristHashing.calculateBoardHash(this);
+    this.halfMoveClock = builder.halfMoveClock;
+    this.positionCounts.put(this.zobristHash, 1);
   }
 
   /**
@@ -227,6 +245,50 @@ public final class Board {
   }
 
   /**
+   * Returns the number of plies played since the last pawn move or capture, used by the
+   * fifty-move rule. A value of one hundred or more means fifty full moves have passed without
+   * a pawn move or capture.
+   *
+   * @return The current halfmove clock.
+   */
+  public int getHalfMoveClock() {
+    return this.halfMoveClock;
+  }
+
+  /**
+   * Returns how many times the current position's Zobrist hash has been reached along the path
+   * of moves applied through {@link #makeMove(Move)} since this board was constructed. A return
+   * value of one means the current position is new to this path.
+   *
+   * @return The repetition count of the current position.
+   */
+  public int repetitionCount() {
+    return this.positionCounts.getOrDefault(this.zobristHash, 0);
+  }
+
+  /**
+   * Returns whether the current position has now been reached a third time along the path of
+   * moves applied through {@link #makeMove(Move)}, the threefold repetition draw condition.
+   * This checks repetition only along this board instance's own make/unmake path; it does not
+   * consult a full game history supplied from outside that path.
+   *
+   * @return True if the current position is a threefold repetition.
+   */
+  public boolean isThreefoldRepetition() {
+    return repetitionCount() >= 3;
+  }
+
+  /**
+   * Returns whether the halfmove clock has reached the fifty-move rule threshold of one hundred
+   * plies without a pawn move or capture.
+   *
+   * @return True if the fifty-move rule now permits a draw claim.
+   */
+  public boolean isFiftyMoveRule() {
+    return this.halfMoveClock >= 100;
+  }
+
+  /**
    * Returns the hash code for this board, using the Zobrist hash value.
    *
    * @return The hash code.
@@ -234,6 +296,141 @@ public final class Board {
   @Override
   public int hashCode() {
     return (int) this.zobristHash;
+  }
+
+  /**
+   * Applies the given move to this board in place: relocates pieces, updates the Zobrist hash,
+   * en passant state, halfmove clock, and transition move, refreshes both players' legal moves
+   * against the resulting position, and pushes an undo record onto this board's undo stack.
+   * <p>
+   * The move must have been generated from this exact board, since it carries a reference back
+   * to the board it was generated from and reads that board's state while computing its hash
+   * update. Passing a move generated from a different board produces an incorrect result.
+   *
+   * @param move The move to apply, generated from this board's current position.
+   */
+  public void makeMove(final Move move) {
+    final Alliance nextMover = this.currentPlayer.getOpponent().getAlliance();
+    final UndoState undo = move.makeMove(this);
+    refreshPlayers(nextMover);
+    this.undoStack.push(undo);
+    this.positionCounts.merge(this.zobristHash, 1, Integer::sum);
+  }
+
+  /**
+   * Reverses the most recent move applied through {@link #makeMove(Move)}, restoring this
+   * board's pieces and state to exactly what they were beforehand.
+   *
+   * @throws IllegalStateException If no move is on the undo stack to unmake.
+   */
+  public void unmakeMove() {
+    if (this.undoStack.isEmpty()) {
+      throw new IllegalStateException("No move on the undo stack to unmake.");
+    }
+    final int remaining = this.positionCounts.merge(this.zobristHash, -1, Integer::sum);
+    if (remaining <= 0) {
+      this.positionCounts.remove(this.zobristHash);
+    }
+    final UndoState undo = this.undoStack.pop();
+    undo.appliedMove().unmakeMove(this, undo);
+    refreshPlayers(undo.priorMoveMaker());
+  }
+
+  /**
+   * Recomputes both players' legal moves against this board's current piece configuration and
+   * reassigns the current player. Called after every mutation, since a board mutated in place
+   * cannot rely on legal moves cached from an earlier position the way an immutably constructed
+   * board can.
+   * <p>
+   * This pays the same cost this engine has always paid per position: full legal move
+   * generation for both sides. Make/unmake removes the Board/Map/Piece allocation that used to
+   * surround that cost, but not yet the recomputation itself. Decoupling legal move generation
+   * so each side computes it lazily, only when asked, rather than both sides eagerly on every
+   * mutation, is the next stage of this work.
+   *
+   * @param moveMaker The alliance to move in the resulting position.
+   */
+  private void refreshPlayers(final Alliance moveMaker) {
+    final Collection<Move> whiteStandardMoves = calculateLegalMoves(this.whitePieces);
+    final Collection<Move> blackStandardMoves = calculateLegalMoves(this.blackPieces);
+    this.whitePlayer = new WhitePlayer(this, whiteStandardMoves, blackStandardMoves);
+    this.blackPlayer = new BlackPlayer(this, whiteStandardMoves, blackStandardMoves);
+    this.currentPlayer = moveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
+  }
+
+  /**
+   * Places a piece on the board at its own reported position, adding it to the board's piece
+   * configuration and to the appropriate alliance's piece list. Used only by the mutating
+   * makeMove/unmakeMove path in the {@link Move} hierarchy.
+   *
+   * @param piece The piece to place, at the square given by its own position.
+   */
+  void placePiece(final Piece piece) {
+    this.boardConfig.put(piece.getPiecePosition(), piece);
+    if (piece.getPieceAllegiance().isWhite()) {
+      this.whitePieces.add(piece);
+    } else {
+      this.blackPieces.add(piece);
+    }
+  }
+
+  /**
+   * Removes whatever piece occupies the given square, if any, from the board's piece
+   * configuration and from the appropriate alliance's piece list. Used only by the mutating
+   * makeMove/unmakeMove path in the {@link Move} hierarchy.
+   *
+   * @param coordinate The square to clear.
+   */
+  void removePiece(final int coordinate) {
+    final Piece piece = this.boardConfig.remove(coordinate);
+    if (piece == null) {
+      return;
+    }
+    if (piece.getPieceAllegiance().isWhite()) {
+      this.whitePieces.remove(piece);
+    } else {
+      this.blackPieces.remove(piece);
+    }
+  }
+
+  /**
+   * Sets the en passant pawn directly, without going through a Builder. Used only by the
+   * mutating makeMove/unmakeMove path in the {@link Move} hierarchy.
+   *
+   * @param pawn The pawn now susceptible to en passant capture, or null if there is none.
+   */
+  void setEnPassantPawn(final Pawn pawn) {
+    this.enPassantPawn = pawn;
+  }
+
+  /**
+   * Sets the Zobrist hash directly, without going through a Builder. Used only by the mutating
+   * makeMove/unmakeMove path in the {@link Move} hierarchy.
+   *
+   * @param zobristHash The new Zobrist hash value.
+   */
+  void setZobristHash(final long zobristHash) {
+    this.zobristHash = zobristHash;
+  }
+
+  /**
+   * Sets the transition move directly, without going through a Builder. Used only by the
+   * mutating makeMove/unmakeMove path in the {@link Move} hierarchy.
+   *
+   * @param move The move to record as having produced the current position.
+   */
+  void setTransitionMove(final Move move) {
+    this.transitionMove = move;
+  }
+
+  /**
+   * Sets the halfmove clock directly, without going through a Builder. Used only by the
+   * mutating makeMove/unmakeMove path in the {@link Move} hierarchy.
+   *
+   * @param halfMoveClock The new halfmove clock value.
+   */
+  void setHalfMoveClock(final int halfMoveClock) {
+    this.halfMoveClock = halfMoveClock;
   }
 
   /**
@@ -337,6 +534,8 @@ public final class Board {
     private Move transitionMove;
     /** The Zobrist hash value for the board being built. */
     private long zobristHash;
+    /** The halfmove clock for the board being built, defaulting to zero. */
+    private int halfMoveClock;
 
     /*** Constructs a new Builder instance with empty configurations. */
     public Builder() {
@@ -389,6 +588,17 @@ public final class Board {
      */
     public void setZobristHash(final long zobristHash) {
       this.zobristHash = zobristHash;
+    }
+
+    /**
+     * Sets the halfmove clock for the board being built, for the fifty-move rule. Defaults to
+     * zero when not set, which is correct for a freshly started game but should be supplied
+     * when building a position parsed from FEN or otherwise reached mid-game.
+     *
+     * @param halfMoveClock The number of plies since the last pawn move or capture.
+     */
+    public void setHalfMoveClock(final int halfMoveClock) {
+      this.halfMoveClock = halfMoveClock;
     }
 
     /**
