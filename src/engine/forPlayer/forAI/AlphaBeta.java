@@ -959,17 +959,43 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (searchStopped) {
       return getCachedEvaluation(board, 0);
-    } if (BoardUtils.isEndOfGame(board)) {
+    }
+
+    long zobristHash = board.getZobristHash();
+    TranspositionTable.Entry entry = transpositionTable.get(zobristHash);
+    if (entry != null) {
+      if (entry.nodeType == TranspositionTable.EXACT) {
+        return entry.score;
+      } else if (entry.nodeType == TranspositionTable.LOWERBOUND) {
+        alpha = Math.max(alpha, entry.score);
+      } else if (entry.nodeType == TranspositionTable.UPPERBOUND) {
+        beta = Math.min(beta, entry.score);
+      }
+      if (alpha >= beta) {
+        return entry.score;
+      }
+    }
+
+    if (BoardUtils.isEndOfGame(board)) {
       return getCachedEvaluation(board, 0);
     }
+
+    final double originalAlpha = alpha;
+    final double originalBeta = beta;
 
     double standPat = getCachedEvaluation(board, 0);
 
     if (maximizing) {
-      if (standPat >= beta) return beta;
+      if (standPat >= beta) {
+        transpositionTable.store(zobristHash, beta, 0, TranspositionTable.LOWERBOUND);
+        return beta;
+      }
       if (standPat > alpha) alpha = standPat;
     } else {
-      if (standPat <= alpha) return alpha;
+      if (standPat <= alpha) {
+        transpositionTable.store(zobristHash, alpha, 0, TranspositionTable.UPPERBOUND);
+        return alpha;
+      }
       if (standPat < beta) beta = standPat;
     }
 
@@ -1029,12 +1055,22 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         }
 
         if (alpha >= beta) {
+          transpositionTable.store(zobristHash, maximizing ? beta : alpha, 0,
+                  maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND);
           return maximizing ? beta : alpha;
         }
       }
     }
 
-    return maximizing ? alpha : beta;
+    double finalScore = maximizing ? alpha : beta;
+    byte nodeType = TranspositionTable.EXACT;
+    if (finalScore <= originalAlpha) {
+      nodeType = TranspositionTable.UPPERBOUND;
+    } else if (finalScore >= originalBeta) {
+      nodeType = TranspositionTable.LOWERBOUND;
+    }
+    transpositionTable.store(zobristHash, finalScore, 0, nodeType);
+    return finalScore;
   }
 
   /**
