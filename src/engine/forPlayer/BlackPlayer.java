@@ -28,18 +28,16 @@ import static engine.forPiece.Piece.PieceType.ROOK;
 public final class BlackPlayer extends Player {
 
   /**
-   * Constructs a new BlackPlayer with the specified board, black's standard legal moves,
-   * and white's active pieces. Initializes the player with access to the current board
-   * state and uses white's pieces directly to test check and castling safety.
+   * Constructs a new BlackPlayer with the specified board and white's active pieces.
+   * Initializes the player with access to the current board state and uses white's pieces
+   * directly to test check and castling safety. This player's legal moves are computed lazily
+   * by {@link Player#getLegalMoves()} rather than here.
    *
    * @param board The current chess board state.
-   * @param blackStandardLegals Collection of legal moves for the black player.
    * @param whitePieces Collection of white's active pieces, used to test check and castling safety.
    */
-  public BlackPlayer(final Board board,
-                     final Collection<Move> blackStandardLegals,
-                     final Collection<Piece> whitePieces) {
-    super(board, blackStandardLegals, whitePieces);
+  public BlackPlayer(final Board board, final Collection<Piece> whitePieces) {
+    super(board, whitePieces);
   }
 
   /**

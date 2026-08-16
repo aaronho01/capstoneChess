@@ -92,10 +92,8 @@ public final class Board {
     this.whitePieces = new ArrayList<>(calculateActivePieces(builder, Alliance.WHITE));
     this.blackPieces = new ArrayList<>(calculateActivePieces(builder, Alliance.BLACK));
     this.enPassantPawn = builder.enPassantPawn;
-    final Collection<Move> whiteStandardMoves = calculateLegalMoves(this.whitePieces);
-    final Collection<Move> blackStandardMoves = calculateLegalMoves(this.blackPieces);
-    this.whitePlayer = new WhitePlayer(this, whiteStandardMoves, this.blackPieces);
-    this.blackPlayer = new BlackPlayer(this, blackStandardMoves, this.whitePieces);
+    this.whitePlayer = new WhitePlayer(this, this.blackPieces);
+    this.blackPlayer = new BlackPlayer(this, this.whitePieces);
     this.currentPlayer = builder.nextMoveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
     this.transitionMove = builder.transitionMove != null ? builder.transitionMove : getNullMove();
     this.zobristHash = builder.zobristHash != 0 ? builder.zobristHash :
@@ -300,8 +298,8 @@ public final class Board {
 
   /**
    * Applies the given move to this board in place: relocates pieces, updates the Zobrist hash,
-   * en passant state, halfmove clock, and transition move, refreshes both players' legal moves
-   * against the resulting position, and pushes an undo record onto this board's undo stack.
+   * en passant state, halfmove clock, and transition move, refreshes both players against the
+   * resulting position, and pushes an undo record onto this board's undo stack.
    * <p>
    * The move must have been generated from this exact board, since it carries a reference back
    * to the board it was generated from and reads that board's state while computing its hash
@@ -337,24 +335,21 @@ public final class Board {
   }
 
   /**
-   * Recomputes both players' legal moves against this board's current piece configuration and
-   * reassigns the current player. Called after every mutation, since a board mutated in place
-   * cannot rely on legal moves cached from an earlier position the way an immutably constructed
-   * board can.
+   * Reassigns both players and the current player against this board's current piece
+   * configuration. Called after every mutation, since a board mutated in place cannot rely on
+   * a {@link Player} built against an earlier position the way an immutably constructed board
+   * can.
    * <p>
-   * This pays the same cost this engine has always paid per position: full legal move
-   * generation for both sides. Make/unmake removes the Board/Map/Piece allocation that used to
-   * surround that cost, but not yet the recomputation itself. Decoupling legal move generation
-   * so each side computes it lazily, only when asked, rather than both sides eagerly on every
-   * mutation, is the next stage of this work.
+   * Constructing a {@link Player} here no longer computes its full legal move list up front;
+   * that generation is deferred to {@link Player#getLegalMoves()} and computed at most once per
+   * side, only if something actually asks for it. Only the cheap parts, a player's king and
+   * check status, are established eagerly here.
    *
    * @param moveMaker The alliance to move in the resulting position.
    */
   private void refreshPlayers(final Alliance moveMaker) {
-    final Collection<Move> whiteStandardMoves = calculateLegalMoves(this.whitePieces);
-    final Collection<Move> blackStandardMoves = calculateLegalMoves(this.blackPieces);
-    this.whitePlayer = new WhitePlayer(this, whiteStandardMoves, this.blackPieces);
-    this.blackPlayer = new BlackPlayer(this, blackStandardMoves, this.whitePieces);
+    this.whitePlayer = new WhitePlayer(this, this.blackPieces);
+    this.blackPlayer = new BlackPlayer(this, this.whitePieces);
     this.currentPlayer = moveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
   }
 
@@ -491,12 +486,14 @@ public final class Board {
   }
 
   /**
-   * Calculates the legal moves for a collection of pieces on the board.
+   * Calculates the pseudo-legal moves for a collection of pieces on the board. Public so that
+   * {@link Player#getLegalMoves()} can call it lazily to generate its own side's moves, rather
+   * than this board generating moves for both sides eagerly on every mutation.
    *
    * @param pieces The collection of pieces for which to calculate legal moves.
    * @return A collection of legal moves for the given pieces.
    */
-  private Collection<Move> calculateLegalMoves(Collection<Piece> pieces) {
+  public Collection<Move> calculateLegalMoves(Collection<Piece> pieces) {
     List<Move> legalMoves = new ArrayList<>();
     for (Piece piece : pieces) {
       legalMoves.addAll(piece.calculateLegalMoves(this));

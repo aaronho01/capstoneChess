@@ -7,8 +7,10 @@ import engine.forBoard.MoveTransition;
 import engine.forPiece.King;
 import engine.forPiece.Piece;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import static engine.forPiece.Piece.PieceType.KING;
@@ -32,27 +34,33 @@ public abstract class Player {
   /** The king piece belonging to this player. */
   protected final King playerKing;
 
-  /** The collection of legal moves available to this player on the current board state. */
-  protected final Collection<Move> legalMoves;
+  /** The opponent's active pieces, used to test check and castling safety. */
+  protected final Collection<Piece> opponentPieces;
+
+  /**
+   * The collection of legal moves available to this player on the current board state. Null
+   * until {@link #getLegalMoves()} is first called, at which point it is computed once and
+   * cached here.
+   */
+  protected Collection<Move> legalMoves;
 
   /** Flag indicating whether this player is currently in check. */
   protected final boolean isInCheck;
 
   /**
-   * Constructs a Player with the specified board, this player's standard legal moves, and the
-   * opponent's active pieces. Establishes the player's king, determines check status directly
-   * against the opponent's pieces, and calculates all legal moves including castling options.
+   * Constructs a Player with the specified board and the opponent's active pieces. Establishes
+   * the player's king and determines check status directly against the opponent's pieces. This
+   * player's legal moves, including castling, are not computed here; they are computed lazily by
+   * {@link #getLegalMoves()} the first time something actually asks for them.
    *
    * @param board The chessboard associated with this player.
-   * @param playerLegals The collection of standard legal moves for this player.
    * @param opponentPieces The opponent's active pieces, used to test check and castling safety.
    */
-  Player(final Board board, final Collection<Move> playerLegals, final Collection<Piece> opponentPieces) {
+  Player(final Board board, final Collection<Piece> opponentPieces) {
     this.board = board;
+    this.opponentPieces = opponentPieces;
     this.playerKing = establishKing();
     this.isInCheck = isSquareAttacked(this.playerKing.getPiecePosition(), opponentPieces, board);
-    playerLegals.addAll(calculateKingCastles(playerLegals, opponentPieces));
-    this.legalMoves = Collections.unmodifiableCollection(playerLegals);
   }
 
   /**
@@ -121,18 +129,37 @@ public abstract class Player {
    * @return True if escape moves exist, false otherwise.
    */
   private boolean hasEscapeMoves() {
-    return this.legalMoves.stream()
+    return getLegalMoves().stream()
             .anyMatch(move -> makeMove(move)
                     .moveStatus().isDone());
   }
 
   /**
-   * Retrieves the collection of legal moves for this player.
+   * Retrieves the collection of legal moves for this player, computing and caching it on the
+   * first call. This is the expensive part of standing up a player, full pseudo-legal move
+   * generation for every active piece plus castling, and most positions visited during search
+   * only ever need one side's move list at a given node, so deferring it here rather than
+   * computing it for both sides on every board mutation is the whole point.
    *
    * @return An unmodifiable collection of legal moves.
    */
   public Collection<Move> getLegalMoves() {
+    if (this.legalMoves == null) {
+      this.legalMoves = calculateLegalMoves();
+    }
     return this.legalMoves;
+  }
+
+  /**
+   * Computes this player's full legal move list against the current board: pseudo-legal moves
+   * for every active piece, plus castling.
+   *
+   * @return An unmodifiable collection of this player's legal moves.
+   */
+  private Collection<Move> calculateLegalMoves() {
+    final List<Move> playerLegals = new ArrayList<>(this.board.calculateLegalMoves(getActivePieces()));
+    playerLegals.addAll(calculateKingCastles(playerLegals, this.opponentPieces));
+    return Collections.unmodifiableList(playerLegals);
   }
 
   /**
@@ -175,7 +202,7 @@ public abstract class Player {
    * @return A MoveTransition object containing the resulting board state and move status.
    */
   public MoveTransition makeMove(final Move move) {
-    if (!this.legalMoves.contains(move)) {
+    if (!getLegalMoves().contains(move)) {
       return new MoveTransition(this.board, MoveStatus.ILLEGAL_MOVE);
     }
     final Board transitionedBoard = move.execute();
