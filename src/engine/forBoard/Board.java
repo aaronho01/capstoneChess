@@ -69,6 +69,14 @@ public final class Board {
   private final Deque<UndoState> undoStack = new ArrayDeque<>();
 
   /**
+   * The undo records for null moves applied through {@link #makeNullMove()} but not yet unmade.
+   * Kept separate from {@link #undoStack} so a null move can never be popped in place of a real
+   * move. The two stacks must still be unwound in strict last-in-first-out order relative to each
+   * other: a move made after a null move must be unmade before that null move is unmade.
+   */
+  private final Deque<NullMoveUndo> nullMoveUndoStack = new ArrayDeque<>();
+
+  /**
    * A running count of how many times each Zobrist hash has been reached along the current
    * make/unmake path, maintained by {@link #makeMove(Move)} and {@link #unmakeMove()} for
    * threefold repetition detection. This tracks repetition only along this board instance's own
@@ -100,6 +108,45 @@ public final class Board {
             ZobristHashing.calculateBoardHash(this);
     this.halfMoveClock = builder.halfMoveClock;
     this.positionCounts.put(this.zobristHash, 1);
+  }
+
+  /**
+   * Constructs a board that is positionally identical to the given board, sharing its piece
+   * objects but owning fresh mutable collections, so that mutating one board cannot affect the
+   * other. The pieces themselves are safe to share because they are immutable.
+   * <p>
+   * The copy starts with empty undo stacks, so it can only be unwound back to the position it
+   * was copied at, not past it. {@link #positionCounts} is seeded from the source so that a copy
+   * taken mid-game carries the repetition history that preceded it.
+   * <p>
+   * A {@link Move} generated from a board may be applied to any board in the same position, not
+   * only to the exact instance it was generated from, because {@link Move#makeMove(Board)} reads
+   * only position state. A copy taken from a board that is never subsequently mutated is exactly
+   * that case, which is what makes a shared root move list safe to apply across search threads
+   * that each own a private copy.
+   *
+   * @param source The board to copy.
+   */
+  private Board(final Board source) {
+    this.boardConfig = new HashMap<>(source.boardConfig);
+    this.whitePieces = new ArrayList<>(source.whitePieces);
+    this.blackPieces = new ArrayList<>(source.blackPieces);
+    this.enPassantPawn = source.enPassantPawn;
+    this.transitionMove = source.transitionMove;
+    this.zobristHash = source.zobristHash;
+    this.halfMoveClock = source.halfMoveClock;
+    this.positionCounts.putAll(source.positionCounts);
+    refreshPlayers(source.currentPlayer.getAlliance());
+  }
+
+  /**
+   * Returns an independent board in the same position as this one, which may be mutated through
+   * {@link #makeMove(Move)} without affecting this board.
+   *
+   * @return A copy of this board.
+   */
+  public Board copy() {
+    return new Board(this);
   }
 
   /**
@@ -335,6 +382,52 @@ public final class Board {
   }
 
   /**
+   * Passes the turn to the opponent without moving a piece, for null move pruning in search.
+   * The side to move flips, any en passant opportunity is cleared because it cannot survive a
+   * turn in which nothing was played, the halfmove clock advances, and the transition move
+   * becomes the null move so that move ordering heuristics keyed on the previous move do not
+   * read a real move that was not actually just played.
+   * <p>
+   * {@link #positionCounts} is deliberately not touched. A null move position is synthetic and
+   * was never reached in a real game, so counting it toward threefold repetition would be wrong.
+   */
+  public void makeNullMove() {
+    final NullMoveUndo undo = new NullMoveUndo(this.enPassantPawn, this.zobristHash,
+            this.halfMoveClock, this.transitionMove, this.currentPlayer.getAlliance());
+    final Alliance nextMover = this.currentPlayer.getOpponent().getAlliance();
+
+    long hash = ZobristHashing.updateHashSideToMove(this.zobristHash);
+    if (this.enPassantPawn != null) {
+      hash = ZobristHashing.updateHashEnPassant(hash, this.enPassantPawn.getPiecePosition() % 8);
+    }
+
+    this.zobristHash = hash;
+    this.enPassantPawn = null;
+    this.halfMoveClock = this.halfMoveClock + 1;
+    this.transitionMove = getNullMove();
+    refreshPlayers(nextMover);
+    this.nullMoveUndoStack.push(undo);
+  }
+
+  /**
+   * Reverses the most recent null move applied through {@link #makeNullMove()}, restoring this
+   * board to exactly what it was beforehand.
+   *
+   * @throws IllegalStateException If no null move is on the null move undo stack to unmake.
+   */
+  public void unmakeNullMove() {
+    if (this.nullMoveUndoStack.isEmpty()) {
+      throw new IllegalStateException("No null move on the undo stack to unmake.");
+    }
+    final NullMoveUndo undo = this.nullMoveUndoStack.pop();
+    this.enPassantPawn = undo.priorEnPassantPawn();
+    this.zobristHash = undo.priorZobristHash();
+    this.halfMoveClock = undo.priorHalfMoveClock();
+    this.transitionMove = undo.priorTransitionMove();
+    refreshPlayers(undo.priorMoveMaker());
+  }
+
+  /**
    * Reassigns both players and the current player against this board's current piece
    * configuration. Called after every mutation, since a board mutated in place cannot rely on
    * a {@link Player} built against an earlier position the way an immutably constructed board
@@ -435,7 +528,7 @@ public final class Board {
    * @return A standard chess board with pieces in their initial positions.
    */
   public static Board createStandardBoard() {
-    return STANDARD_BOARD;
+    return STANDARD_BOARD.copy();
   }
 
   /**

@@ -19,8 +19,10 @@ import java.util.Map;
  * by each move at the root so the faulty branch can be found by comparing against a reference engine.
  * The suite can also verify that the incrementally updated Zobrist hash carried by each board agrees
  * with a hash recalculated from scratch, since a hash that drifts corrupts transposition table
- * lookups without changing any node count. This class is designed to be run from the command line
- * and its entry point returns a non-zero exit status when any check fails.
+ * lookups without changing any node count. Alongside that it can verify the board copy and null move
+ * round trips, which likewise change no node count and so would otherwise go unchecked by a perft.
+ * This class is designed to be run from the command line and its entry point returns a non-zero exit
+ * status when any check fails.
  *
  * @author Aaron Ho
  */
@@ -33,8 +35,14 @@ public class PerftSuite {
   /** The depth the Zobrist consistency walk is limited to, since it recalculates a hash at every node. */
   private static final int HASH_VERIFICATION_DEPTH = 3;
 
+  /** The depth the mutation round trip walk is limited to, since it copies a board at every node. */
+  private static final int MUTATION_VERIFICATION_DEPTH = 3;
+
   /** The command line flag requesting a Zobrist consistency walk alongside the node counts. */
   private static final String VERIFY_HASH_FLAG = "--verify-hash";
+
+  /** The command line flag requesting a copy and null move round trip walk alongside the node counts. */
+  private static final String VERIFY_MUTATION_FLAG = "--verify-mutation";
 
   /** The command line flag requesting usage information. */
   private static final String HELP_FLAG = "--help";
@@ -82,8 +90,8 @@ public class PerftSuite {
   /**
    * Runs the suite from the command line. With no arguments every position is tested to the default
    * depth. A single numeric argument raises or lowers that depth, the verify hash flag adds a Zobrist
-   * consistency walk, and the divide keyword breaks a single position down by root move instead of
-   * running the suite.
+   * consistency walk, the verify mutation flag adds a copy and null move round trip walk, and the
+   * divide keyword breaks a single position down by root move instead of running the suite.
    *
    * @param args The command line arguments, as described by the usage text.
    */
@@ -94,9 +102,12 @@ public class PerftSuite {
     }
     int maxDepth = DEFAULT_MAX_DEPTH;
     boolean verifyHashes = false;
+    boolean verifyMutation = false;
     for (final String argument : args) {
       if (VERIFY_HASH_FLAG.equals(argument)) {
         verifyHashes = true;
+      } else if (VERIFY_MUTATION_FLAG.equals(argument)) {
+        verifyMutation = true;
       } else if (HELP_FLAG.equals(argument)) {
         printUsage();
         return;
@@ -115,7 +126,19 @@ public class PerftSuite {
       printUsage();
       return;
     }
-    System.exit(run(maxDepth, verifyHashes) ? 0 : 1);
+    System.exit(run(maxDepth, verifyHashes, verifyMutation) ? 0 : 1);
+  }
+
+  /**
+   * Tests every reference position up to the requested depth without the mutation round trip walk.
+   * This form is preserved so that callers written before that walk existed continue to work.
+   *
+   * @param maxDepth The greatest depth to test, limited per position by the depths with known counts.
+   * @param verifyHashes Whether to walk each position checking Zobrist hash consistency.
+   * @return True if every check passed, false otherwise.
+   */
+  public static boolean run(final int maxDepth, final boolean verifyHashes) {
+    return run(maxDepth, verifyHashes, false);
   }
 
   /**
@@ -125,16 +148,17 @@ public class PerftSuite {
    *
    * @param maxDepth The greatest depth to test, limited per position by the depths with known counts.
    * @param verifyHashes Whether to walk each position checking Zobrist hash consistency.
+   * @param verifyMutation Whether to walk each position checking the copy and null move round trips.
    * @return True if every check passed, false otherwise.
    */
-  public static boolean run(final int maxDepth, final boolean verifyHashes) {
+  public static boolean run(final int maxDepth, final boolean verifyHashes, final boolean verifyMutation) {
     System.out.printf("Perft suite: %d positions, maximum depth %d%n%n",
             STANDARD_POSITIONS.size(), maxDepth);
     int checksRun = 0;
     int failures = 0;
     int positionsFailed = 0;
     for (final PerftPosition position : STANDARD_POSITIONS) {
-      final PositionOutcome outcome = runPosition(position, maxDepth, verifyHashes);
+      final PositionOutcome outcome = runPosition(position, maxDepth, verifyHashes, verifyMutation);
       checksRun += outcome.checksRun();
       failures += outcome.failures();
       if (outcome.failures() > 0) {
@@ -150,15 +174,21 @@ public class PerftSuite {
    * Tests a single reference position up to the requested depth and prints its results.
    * Each depth reports the expected count, the count this engine produced, the elapsed time, and
    * the resulting node rate, which doubles as a rough measure of move generation throughput.
+   * <p>
+   * A failing mutation round trip is counted as a failure but does not abandon the position, since
+   * it says nothing about whether the node counts are right and both answers are worth having in
+   * one report.
    *
    * @param position The reference position to test.
    * @param maxDepth The greatest depth to test, limited by the depths with known counts.
    * @param verifyHashes Whether to walk the position checking Zobrist hash consistency.
+   * @param verifyMutation Whether to walk the position checking the copy and null move round trips.
    * @return The number of checks run for this position and the number of them that failed.
    */
   private static PositionOutcome runPosition(final PerftPosition position,
                                              final int maxDepth,
-                                             final boolean verifyHashes) {
+                                             final boolean verifyHashes,
+                                             final boolean verifyMutation) {
     System.out.println(position.name());
     System.out.println("  " + position.fen());
     final Board board;
@@ -172,8 +202,15 @@ public class PerftSuite {
     if (verifyHashes) {
       reportHashConsistency(board);
     }
-    final int deepestDepth = Math.min(maxDepth, position.deepestKnownDepth());
     int checksRun = 0;
+    int failures = 0;
+    if (verifyMutation) {
+      checksRun++;
+      if (!reportMutationConsistency(board)) {
+        failures++;
+      }
+    }
+    final int deepestDepth = Math.min(maxDepth, position.deepestKnownDepth());
     for (int depth = 1; depth <= deepestDepth; depth++) {
       final long expectedNodes = position.expectedNodesAt(depth);
       final long startTime = System.nanoTime();
@@ -188,11 +225,11 @@ public class PerftSuite {
                 actualNodes - expectedNodes, depth);
         printDivide(board, depth);
         System.out.println();
-        return new PositionOutcome(checksRun, 1);
+        return new PositionOutcome(checksRun, failures + 1);
       }
     }
     System.out.println();
-    return new PositionOutcome(checksRun, 0);
+    return new PositionOutcome(checksRun, failures);
   }
 
   /**
@@ -210,6 +247,27 @@ public class PerftSuite {
     System.out.printf("  zobrist hash mismatch: carried %d, recalculated %d, at this position:%n",
             divergentBoard.getZobristHash(), ZobristHashing.calculateBoardHash(divergentBoard));
     System.out.println(divergentBoard);
+  }
+
+  /**
+   * Walks the given position checking that {@link Board#copy()} reproduces every reachable board
+   * exactly and that a null move applied to it can be unmade without a trace, and reports the first
+   * position where either fails. Neither operation changes a node count, so nothing in the perft
+   * counts would reveal a fault in them.
+   *
+   * @param board The position from which to begin the walk.
+   * @return True if every position checked out, false otherwise.
+   */
+  private static boolean reportMutationConsistency(final Board board) {
+    final String fault = Perft.findMutationDivergence(board, MUTATION_VERIFICATION_DEPTH);
+    if (fault == null) {
+      System.out.printf("  copy and null move round trips are exact to depth %d%n",
+              MUTATION_VERIFICATION_DEPTH);
+      return true;
+    }
+    System.out.println("  FAIL  mutation round trip diverged:");
+    System.out.println("  " + fault);
+    return false;
   }
 
   /**
@@ -297,7 +355,8 @@ public class PerftSuite {
   private static void printUsage() {
     System.out.println("""
             Usage:
-              PerftSuite [maxDepth] [--verify-hash]   run every reference position, default depth 4
+              PerftSuite [maxDepth] [--verify-hash] [--verify-mutation]
+                                                      run every reference position, default depth 4
               PerftSuite divide <depth> <fen>         break one position down by root move
               PerftSuite divide <depth> startpos      break the starting position down by root move
               PerftSuite --help                       print this message
@@ -345,11 +404,11 @@ public class PerftSuite {
 
   /**
    * The PositionOutcome record reports how many checks a position ran and how many of them failed.
-   * A position is abandoned after its first failure, so a failing position reports fewer checks run
-   * than the requested depth would otherwise imply.
+   * A position is abandoned after its first node count failure, so a failing position reports fewer
+   * checks run than the requested depth would otherwise imply.
    *
-   * @param checksRun The number of depths tested for the position.
-   * @param failures The number of tested depths that produced the wrong node count.
+   * @param checksRun The number of checks made for the position.
+   * @param failures The number of those checks that failed.
    */
   private record PositionOutcome(int checksRun, int failures) {
   }

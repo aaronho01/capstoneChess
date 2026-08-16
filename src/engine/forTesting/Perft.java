@@ -1,10 +1,12 @@
 package engine.forTesting;
 
+import engine.Alliance;
 import engine.forBoard.Board;
 import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
 import engine.forBoard.MoveTransition;
 import engine.forBoard.ZobristHashing;
+import engine.forPiece.Pawn;
 import engine.forPiece.Piece;
 
 import java.util.Map;
@@ -180,6 +182,134 @@ public class Perft {
       if (divergentBoard != null) {
         return divergentBoard;
       }
+    }
+    return null;
+  }
+
+  /**
+   * Walks the legal move tree and returns a description of the first position at which either
+   * {@link Board#copy()} or a {@link Board#makeNullMove()} and {@link Board#unmakeNullMove()}
+   * round trip fails to reproduce the position it was given. Nothing in the engine calls either
+   * of those yet, so this rather than a node count is what validates them.
+   *
+   * @param board The position from which to begin the walk. Mutated during the walk and restored
+   *              before this method returns.
+   * @param depth The number of plies to walk.
+   * @return A description of the first fault found, or null if every position checks out.
+   */
+  public static String findMutationDivergence(final Board board, final int depth) {
+    final String copyFault = describeCopyFault(board);
+    if (copyFault != null) {
+      return copyFault + System.lineSeparator() + board;
+    }
+    final String nullMoveFault = describeNullMoveFault(board);
+    if (nullMoveFault != null) {
+      return nullMoveFault + System.lineSeparator() + board;
+    }
+    if (depth <= 0) {
+      return null;
+    }
+    for (final Move move : board.currentPlayer().getLegalMoves()) {
+      board.makeMove(move);
+      try {
+        if (board.currentPlayer().getOpponent().isInCheck()) {
+          continue;
+        }
+        final String fault = findMutationDivergence(board, depth - 1);
+        if (fault != null) {
+          return fault;
+        }
+      } finally {
+        board.unmakeMove();
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Checks that a copy of the given board reproduces it exactly. Pieces are compared by identity
+   * rather than equality, because a copy is expected to share the source's piece objects.
+   *
+   * @param board The board to copy and compare against.
+   * @return A description of the first difference found, or null if the copy is faithful.
+   */
+  private static String describeCopyFault(final Board board) {
+    final Board clone = board.copy();
+    if (clone.getZobristHash() != board.getZobristHash()) {
+      return "Copy carries hash " + clone.getZobristHash() + ", expected " + board.getZobristHash() + ".";
+    }
+    if (clone.getZobristHash() != ZobristHashing.calculateBoardHash(clone)) {
+      return "Copy carries a hash that disagrees with a hash recalculated from its own position.";
+    }
+    if (clone.currentPlayer().getAlliance() != board.currentPlayer().getAlliance()) {
+      return "Copy has the wrong side to move.";
+    }
+    if (clone.getHalfMoveClock() != board.getHalfMoveClock()) {
+      return "Copy carries halfmove clock " + clone.getHalfMoveClock() +
+              ", expected " + board.getHalfMoveClock() + ".";
+    }
+    if (clone.getEnPassantPawn() != board.getEnPassantPawn()) {
+      return "Copy carries a different en passant pawn.";
+    }
+    for (int coordinate = 0; coordinate < BoardUtils.NUM_TILES; coordinate++) {
+      if (clone.getPiece(coordinate) != board.getPiece(coordinate)) {
+        return "Copy differs at square " + BoardUtils.getPositionAtCoordinate(coordinate) + ".";
+      }
+    }
+    if (clone.currentPlayer().getLegalMoves().size() != board.currentPlayer().getLegalMoves().size()) {
+      return "Copy generates a different number of legal moves for the player to move.";
+    }
+    return null;
+  }
+
+  /**
+   * Checks that a null move applied to the given board produces a consistent position and that
+   * unmaking it restores the board exactly. The hash after the null move is checked against a
+   * hash recalculated from scratch, which is the same standard {@link #findZobristDivergence}
+   * holds real moves to.
+   *
+   * @param board The board to null move and restore. Restored before this method returns.
+   * @return A description of the first fault found, or null if the round trip is exact.
+   */
+  private static String describeNullMoveFault(final Board board) {
+    final Pawn priorEnPassantPawn = board.getEnPassantPawn();
+    final long priorZobristHash = board.getZobristHash();
+    final int priorHalfMoveClock = board.getHalfMoveClock();
+    final Move priorTransitionMove = board.getTransitionMove();
+    final Alliance priorMoveMaker = board.currentPlayer().getAlliance();
+
+    board.makeNullMove();
+    try {
+      if (board.currentPlayer().getAlliance() == priorMoveMaker) {
+        return "Null move left the same side to move.";
+      }
+      if (board.getEnPassantPawn() != null) {
+        return "Null move left an en passant pawn set.";
+      }
+      if (board.getHalfMoveClock() != priorHalfMoveClock + 1) {
+        return "Null move did not advance the halfmove clock by one.";
+      }
+      if (board.getZobristHash() != ZobristHashing.calculateBoardHash(board)) {
+        return "Null move produced a hash that disagrees with a hash recalculated from scratch.";
+      }
+    } finally {
+      board.unmakeNullMove();
+    }
+
+    if (board.getZobristHash() != priorZobristHash) {
+      return "Unmaking the null move did not restore the hash.";
+    }
+    if (board.getEnPassantPawn() != priorEnPassantPawn) {
+      return "Unmaking the null move did not restore the en passant pawn.";
+    }
+    if (board.getHalfMoveClock() != priorHalfMoveClock) {
+      return "Unmaking the null move did not restore the halfmove clock.";
+    }
+    if (board.getTransitionMove() != priorTransitionMove) {
+      return "Unmaking the null move did not restore the transition move.";
+    }
+    if (board.currentPlayer().getAlliance() != priorMoveMaker) {
+      return "Unmaking the null move did not restore the side to move.";
     }
     return null;
   }
