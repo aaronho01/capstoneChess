@@ -1,8 +1,8 @@
 # Capstone Chess
 
 A chess engine built in Java, developed as a STEM Academy capstone project at Essex High School
-between January 2023 and May 2025. The project spans nearly 14,000 lines of code and includes a
-graphical interface and full chess rule enforcement.
+between January 2023 and May 2025. The project spans over 15,000 lines of code and includes a
+graphical interface and full chess rule enforcement. Development is ongoing.
 
 ## Features
 
