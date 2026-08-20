@@ -455,11 +455,13 @@ public final class Board {
    */
   void placePiece(final Piece piece) {
     this.boardConfig.put(piece.getPiecePosition(), piece);
-    if (piece.getPieceAllegiance().isWhite()) {
-      this.whitePieces.add(piece);
-    } else {
-      this.blackPieces.add(piece);
+    final List<Piece> pieces = piece.getPieceAllegiance().isWhite() ? this.whitePieces : this.blackPieces;
+    final int coordinate = piece.getPiecePosition();
+    int index = 0;
+    while (index < pieces.size() && pieces.get(index).getPiecePosition() < coordinate) {
+      index++;
     }
+    pieces.add(index, piece);
   }
 
   /**
@@ -474,10 +476,12 @@ public final class Board {
     if (piece == null) {
       return;
     }
-    if (piece.getPieceAllegiance().isWhite()) {
-      this.whitePieces.remove(piece);
-    } else {
-      this.blackPieces.remove(piece);
+    final List<Piece> pieces = piece.getPieceAllegiance().isWhite() ? this.whitePieces : this.blackPieces;
+    for (int index = 0; index < pieces.size(); index++) {
+      if (pieces.get(index).getPiecePosition() == coordinate) {
+        pieces.remove(index);
+        return;
+      }
     }
   }
 
@@ -606,7 +610,9 @@ public final class Board {
       if (piece.getPieceAllegiance() == alliance) {
         activePieces.add(piece);
       }
-    } return activePieces;
+    }
+    activePieces.sort(Comparator.comparingInt(Piece::getPiecePosition));
+    return activePieces;
   }
 
   /**
