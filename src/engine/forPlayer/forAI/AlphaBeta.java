@@ -5,7 +5,6 @@ import com.google.common.collect.ComparisonChain;
 import engine.forBoard.Board;
 import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
-import engine.forBoard.MoveTransition;
 import engine.forPiece.Piece;
 import engine.forPlayer.Player;
 
@@ -420,21 +419,21 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private Move searchRootParallel(final Board board, final int depth, double alpha, double beta,
                                   final Move previousBestMove) {
     final List<Move> allMoves = new ArrayList<>(
-            MoveSorter.EXPENSIVE.sort(board.currentPlayer().getLegalMoves(), board, this, 0));
+        MoveSorter.EXPENSIVE.sort(board.currentPlayer().getLegalMoves(), board, this, 0));
 
     if (allMoves.isEmpty()) {
       return MoveFactory.getNullMove();
     }
 
     if (previousBestMove != null && previousBestMove != MoveFactory.getNullMove() &&
-            allMoves.contains(previousBestMove)) {
+        allMoves.contains(previousBestMove)) {
       allMoves.remove(previousBestMove);
       allMoves.add(0, previousBestMove);
     }
 
     final AtomicReference<Move> globalBestMove = new AtomicReference<>(allMoves.get(0));
     final AtomicReference<Double> globalBestScore = new AtomicReference<>(
-            board.currentPlayer().getAlliance().isWhite() ? alpha : beta);
+        board.currentPlayer().getAlliance().isWhite() ? alpha : beta);
 
     final AtomicInteger moveIndex = new AtomicInteger(0);
 
@@ -451,10 +450,17 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           killerMoves.set(new Move[2][MAX_SEARCH_DEPTH]);
         }
 
+        final Board threadBoard = board.copy();
+        final long rootHash = threadBoard.getZobristHash();
+
         try {
           if (id == 0) {
-            searchFirstMove(board, allMoves.get(0), depth, globalBestMove, globalBestScore, alpha, beta);
-            firstMoveLatch.countDown();
+            try {
+              searchMove(threadBoard, allMoves.get(0), depth,
+                  globalBestMove, globalBestScore, alpha, beta);
+            } finally {
+              firstMoveLatch.countDown();
+            }
           } else {
             firstMoveLatch.await();
           }
@@ -466,17 +472,15 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             int threadDepth = depth - (id % 2);
             if (threadDepth < 1) threadDepth = 1;
 
-            final Move move = allMoves.get(idx);
-            final MoveTransition moveTransition = board.currentPlayer().makeMove(move);
-
-            if (moveTransition.moveStatus().isDone()) {
-              searchMove(board, move, moveTransition.toBoard(), threadDepth, globalBestMove, globalBestScore, alpha, beta);
-            }
+            searchMove(threadBoard, allMoves.get(idx), threadDepth,
+                globalBestMove, globalBestScore, alpha, beta);
           }
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
         } finally {
           boardsEvaluated.addAndGet(stats.boardsEvaluated);
+          assert threadBoard.getZobristHash() == rootHash :
+              "Thread board not restored to the root position: unbalanced make/unmake.";
         }
       }));
     }
@@ -499,62 +503,58 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Searches the first move at the root using the Young Brothers Wait protocol
-   * to ensure the most promising move is fully explored before other threads begin.
+   * Applies the given root move to the calling thread's private board, searches the resulting
+   * position, unmakes the move, and then updates the shared best move and score if this move
+   * improved on them.
+   * <p>
+   * The score comparison and the countermove record deliberately happen after the unmake, because
+   * {@link #recordCounterMove} reads the board's transition move and must see the opponent's
+   * previous move rather than the move just searched.
    *
-   * @param board The root board position.
-   * @param move The first move to search.
+   * @param board The calling thread's private board, in the root position.
+   * @param move The root move to search.
    * @param depth The search depth.
    * @param bestMove Reference to the current best move.
    * @param bestScore Reference to the current best score.
    * @param alpha The alpha bound.
    * @param beta The beta bound.
    */
-  private void searchFirstMove(Board board, Move move, int depth,
-                               AtomicReference<Move> bestMove, AtomicReference<Double> bestScore,
-                               double alpha, double beta) {
-    final MoveTransition moveTransition = board.currentPlayer().makeMove(move);
-    if (moveTransition.moveStatus().isDone()) {
-      searchMove(board, move, moveTransition.toBoard(), depth, bestMove, bestScore, alpha, beta);
-    }
-  }
+  private void searchMove(final Board board, final Move move, final int depth,
+                          final AtomicReference<Move> bestMove, final AtomicReference<Double> bestScore,
+                          final double alpha, final double beta) {
+    final boolean rootIsWhite = board.currentPlayer().getAlliance().isWhite();
 
-  /**
-   * Searches a specific move and updates the best move and score if a better result is found.
-   *
-   * @param board The current board position.
-   * @param move The move to search.
-   * @param toBoard The board position after the move.
-   * @param depth The search depth.
-   * @param bestMove Reference to the current best move.
-   * @param bestScore Reference to the current best score.
-   * @param alpha The alpha bound.
-   * @param beta The beta bound.
-   */
-  private void searchMove(Board board, Move move, Board toBoard, int depth,
-                          AtomicReference<Move> bestMove, AtomicReference<Double> bestScore,
-                          double alpha, double beta) {
+    board.makeMove(move);
+    if (board.currentPlayer().getOpponent().isInCheck()) {
+      board.unmakeMove();
+      return;
+    }
+
     double score;
-    if (board.currentPlayer().getAlliance().isWhite()) {
-      score = min(toBoard, depth - 1, alpha, beta, 1);
+    try {
+      score = rootIsWhite ?
+          min(board, depth - 1, alpha, beta, 1) :
+          max(board, depth - 1, alpha, beta, 1);
+    } finally {
+      board.unmakeMove();
+    }
+
+    if (rootIsWhite) {
       if (score > bestScore.get()) {
         synchronized (bestScore) {
           if (score > bestScore.get()) {
             bestScore.set(score);
             bestMove.set(move);
-
             recordCounterMove(board, move);
           }
         }
       }
     } else {
-      score = max(toBoard, depth - 1, alpha, beta, 1);
       if (score < bestScore.get()) {
         synchronized (bestScore) {
           if (score < bestScore.get()) {
             bestScore.set(score);
             bestMove.set(move);
-
             recordCounterMove(board, move);
           }
         }
@@ -592,7 +592,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, true) :
-              getCachedEvaluation(board, depth);
+          getCachedEvaluation(board, depth);
     }
 
     if (depth <= 0) {
@@ -618,6 +618,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       return getCachedEvaluation(board, depth);
     }
 
+    final boolean inCheckAtNode = board.currentPlayer().isInCheck();
+
     if (depth == 1) {
       double eval = getCachedEvaluation(board, depth);
       if (eval + RAZOR_MARGIN < alpha) {
@@ -625,7 +627,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    if (depth < FUTILITY_PRUNING_DEPTH && !board.currentPlayer().isInCheck()) {
+    if (depth < FUTILITY_PRUNING_DEPTH && !inCheckAtNode) {
       double eval = getCachedEvaluation(board, depth);
       if (eval >= beta + (depth * 100)) {
         return eval;
@@ -641,20 +643,20 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    if (depth >= 3 && !board.currentPlayer().isInCheck() && hasNonPawnMaterial(board.currentPlayer())) {
-      Board nullMoveBoard = makeNullMove(board);
-      int R = 2 + depth / 6;
-      double nullMoveScore = min(nullMoveBoard, depth - 1 - R, alpha, beta, ply + 1);
-
-      if (nullMoveScore >= beta) {
-        if (depth >= 6) {
-          double verificationScore = min(nullMoveBoard, depth - 4, alpha, beta, ply + 1);
-          if (verificationScore >= beta) {
-            return beta;
-          }
-        } else {
-          return beta;
+    if (depth >= 3 && !inCheckAtNode && hasNonPawnMaterial(board.currentPlayer())) {
+      final int R = 2 + depth / 6;
+      boolean nullMovePrunes = false;
+      board.makeNullMove();
+      try {
+        double nullMoveScore = min(board, depth - 1 - R, alpha, beta, ply + 1);
+        if (nullMoveScore >= beta) {
+          nullMovePrunes = depth < 6 || min(board, depth - 4, alpha, beta, ply + 1) >= beta;
         }
+      } finally {
+        board.unmakeNullMove();
+      }
+      if (nullMovePrunes) {
+        return beta;
       }
     }
 
@@ -686,58 +688,63 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         }
       }
 
-      final MoveTransition moveTransition = board.currentPlayer().makeMove(move);
-      if (moveTransition.moveStatus().isDone()) {
-        final Board toBoard = moveTransition.toBoard();
-        double currentValue;
+      board.makeMove(move);
+      if (board.currentPlayer().getOpponent().isInCheck()) {
+        board.unmakeMove();
+        continue;
+      }
 
+      double currentValue;
+      try {
         int newDepth = depth - 1;
-        if (toBoard.currentPlayer().isInCheck()) {
+        if (board.currentPlayer().isInCheck()) {
           newDepth++;
         }
 
         if (firstMove) {
-          currentValue = min(toBoard, newDepth, currentAlpha, beta, ply + 1);
+          currentValue = min(board, newDepth, currentAlpha, beta, ply + 1);
         } else {
           int reduction = 0;
-          if (depth >= 3 && movesSearched >= 4 && !move.isAttack() && !board.currentPlayer().isInCheck()) {
+          if (depth >= 3 && movesSearched >= 4 && !move.isAttack() && !inCheckAtNode) {
             reduction = 1 + (movesSearched / 6);
             if (reduction > 3) reduction = 3;
           }
 
-          currentValue = min(toBoard, newDepth - reduction, currentAlpha, currentAlpha + 0.1, ply + 1);
+          currentValue = min(board, newDepth - reduction, currentAlpha, currentAlpha + 0.1, ply + 1);
 
           if (currentValue > currentAlpha && currentValue < beta) {
-            currentValue = min(toBoard, newDepth, currentAlpha, beta, ply + 1);
+            currentValue = min(board, newDepth, currentAlpha, beta, ply + 1);
           }
         }
-
-        if (currentValue > currentAlpha) {
-          currentAlpha = currentValue;
-          bestFoundMove = move;
-
-          if (!move.isAttack()) {
-            if (!move.equals(killers[0][ply])) {
-              killers[1][ply] = killers[0][ply];
-              killers[0][ply] = move;
-            }
-          }
-
-          recordCounterMove(board, move);
-
-          if (currentAlpha >= beta) {
-            if (!move.isAttack()) {
-              historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
-            }
-
-            transpositionTable.store(zobristHash, beta, depth, TranspositionTable.LOWERBOUND, bestFoundMove);
-            return beta;
-          }
-        }
-
-        firstMove = false;
-        movesSearched++;
+      } finally {
+        board.unmakeMove();
       }
+
+      if (currentValue > currentAlpha) {
+        currentAlpha = currentValue;
+        bestFoundMove = move;
+
+        if (!move.isAttack()) {
+          if (!move.equals(killers[0][ply])) {
+            killers[1][ply] = killers[0][ply];
+            killers[0][ply] = move;
+          }
+        }
+
+        recordCounterMove(board, move);
+
+        if (currentAlpha >= beta) {
+          if (!move.isAttack()) {
+            historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
+          }
+
+          transpositionTable.store(zobristHash, beta, depth, TranspositionTable.LOWERBOUND, bestFoundMove);
+          return beta;
+        }
+      }
+
+      firstMove = false;
+      movesSearched++;
     }
 
     byte nodeType = TranspositionTable.EXACT;
@@ -768,7 +775,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, false) :
-              getCachedEvaluation(board, depth);
+          getCachedEvaluation(board, depth);
     }
 
     if (depth <= 0) {
@@ -794,6 +801,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       return getCachedEvaluation(board, depth);
     }
 
+    final boolean inCheckAtNode = board.currentPlayer().isInCheck();
+
     if (depth == 1) {
       double eval = getCachedEvaluation(board, depth);
       if (eval - RAZOR_MARGIN > beta) {
@@ -801,7 +810,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    if (depth < FUTILITY_PRUNING_DEPTH && !board.currentPlayer().isInCheck()) {
+    if (depth < FUTILITY_PRUNING_DEPTH && !inCheckAtNode) {
       double eval = getCachedEvaluation(board, depth);
       if (eval <= alpha - (depth * 100)) {
         return eval;
@@ -817,20 +826,20 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    if (depth >= 3 && !board.currentPlayer().isInCheck() && hasNonPawnMaterial(board.currentPlayer())) {
-      Board nullMoveBoard = makeNullMove(board);
-      int R = 2 + depth / 6;
-      double nullMoveScore = max(nullMoveBoard, depth - 1 - R, alpha, beta, ply + 1);
-
-      if (nullMoveScore <= alpha) {
-        if (depth >= 6) {
-          double verificationScore = max(nullMoveBoard, depth - 4, alpha, beta, ply + 1);
-          if (verificationScore <= alpha) {
-            return alpha;
-          }
-        } else {
-          return alpha;
+    if (depth >= 3 && !inCheckAtNode && hasNonPawnMaterial(board.currentPlayer())) {
+      final int R = 2 + depth / 6;
+      boolean nullMovePrunes = false;
+      board.makeNullMove();
+      try {
+        double nullMoveScore = max(board, depth - 1 - R, alpha, beta, ply + 1);
+        if (nullMoveScore <= alpha) {
+          nullMovePrunes = depth < 6 || max(board, depth - 4, alpha, beta, ply + 1) <= alpha;
         }
+      } finally {
+        board.unmakeNullMove();
+      }
+      if (nullMovePrunes) {
+        return alpha;
       }
     }
 
@@ -862,32 +871,37 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         }
       }
 
-      final MoveTransition moveTransition = board.currentPlayer().makeMove(move);
-      if (moveTransition.moveStatus().isDone()) {
-        final Board toBoard = moveTransition.toBoard();
-        double currentValue;
+      board.makeMove(move);
+      if (board.currentPlayer().getOpponent().isInCheck()) {
+        board.unmakeMove();
+        continue;
+      }
 
+      double currentValue;
+      try {
         int newDepth = depth - 1;
-        if (toBoard.currentPlayer().isInCheck()) {
+        if (board.currentPlayer().isInCheck()) {
           newDepth++;
         }
 
         if (firstMove) {
-          currentValue = max(toBoard, newDepth, alpha, currentBeta, ply + 1);
+          currentValue = max(board, newDepth, alpha, currentBeta, ply + 1);
         } else {
           int reduction = 0;
-          if (depth >= 3 && movesSearched >= 4 && !move.isAttack() && !board.currentPlayer().isInCheck()) {
+          if (depth >= 3 && movesSearched >= 4 && !move.isAttack() && !inCheckAtNode) {
             reduction = 1 + (movesSearched / 6);
             if (reduction > 3) reduction = 3;
           }
 
-          currentValue = max(toBoard, newDepth - reduction, currentBeta - 0.1, currentBeta, ply + 1);
+          currentValue = max(board, newDepth - reduction, currentBeta - 0.1, currentBeta, ply + 1);
 
           if (currentValue < currentBeta && currentValue > alpha) {
-            currentValue = max(toBoard, newDepth, alpha, currentBeta, ply + 1);
+            currentValue = max(board, newDepth, alpha, currentBeta, ply + 1);
           }
         }
-
+      } finally {
+        board.unmakeMove();
+      }
         if (currentValue < currentBeta) {
           currentBeta = currentValue;
           bestFoundMove = move;
@@ -913,7 +927,6 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
         firstMove = false;
         movesSearched++;
-      }
     }
 
     byte nodeType = TranspositionTable.EXACT;
@@ -994,61 +1007,61 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (board.currentPlayer().isInCheck()) {
       return maximizing ?
-              max(board, 1, alpha, beta, ply + 1) :
-              min(board, 1, alpha, beta, ply + 1);
+          max(board, 1, alpha, beta, ply + 1) :
+          min(board, 1, alpha, beta, ply + 1);
     }
 
     List<Move> captures = board.currentPlayer().getLegalMoves().stream()
-            .filter(Move::isAttack)
-            .sorted((m1, m2) -> {
-              boolean isM1Undefended = m1.isAttack() && m1.getAttackedPiece() != null &&
-                      !seeEvaluator.isPieceDefended(m1.getAttackedPiece(), board);
-              boolean isM2Undefended = m2.isAttack() && m2.getAttackedPiece() != null &&
-                      !seeEvaluator.isPieceDefended(m2.getAttackedPiece(), board);
+        .filter(Move::isAttack)
+        .sorted((m1, m2) -> {
+          boolean isM1Undefended = m1.isAttack() && m1.getAttackedPiece() != null &&
+              !seeEvaluator.isPieceDefended(m1.getAttackedPiece(), board);
+          boolean isM2Undefended = m2.isAttack() && m2.getAttackedPiece() != null &&
+              !seeEvaluator.isPieceDefended(m2.getAttackedPiece(), board);
 
-              if (isM1Undefended != isM2Undefended) {
-                return isM1Undefended ? -1 : 1;
-              }
+          if (isM1Undefended != isM2Undefended) {
+            return isM1Undefended ? -1 : 1;
+          }
 
-              int see1 = seeEvaluator.evaluate(board, m1);
-              int see2 = seeEvaluator.evaluate(board, m2);
-              return Integer.compare(see2, see1);
-            })
-            .toList();
+          int see1 = seeEvaluator.evaluate(board, m1);
+          int see2 = seeEvaluator.evaluate(board, m2);
+          return Integer.compare(see2, see1);
+        })
+        .toList();
 
     for (Move move : captures) {
-      int seeScore = seeEvaluator.evaluate(board, move);
+      final int seeScore = seeEvaluator.evaluate(board, move);
+      final boolean isUndefendedCapture = !seeEvaluator.isPieceDefended(move.getAttackedPiece(), board);
 
-      boolean isUndefendedCapture = !seeEvaluator.isPieceDefended(move.getAttackedPiece(), board);
+      board.makeMove(move);
 
-      if (seeScore < SEE_PRUNING_THRESHOLD && !isUndefendedCapture) {
-        final MoveTransition moveTransition = board.currentPlayer().makeMove(move);
-        if (moveTransition.moveStatus().isDone()) {
-          boolean givesCheck = moveTransition.toBoard().currentPlayer().isInCheck();
-          if (!givesCheck) {
-            continue;
-          }
-        } else {
-          continue;
-        }
+      final boolean legal = !board.currentPlayer().getOpponent().isInCheck();
+      final boolean givesCheck = legal && board.currentPlayer().isInCheck();
+      final boolean prunedByExchange = seeScore < SEE_PRUNING_THRESHOLD &&
+          !isUndefendedCapture && !givesCheck;
+
+      if (!legal || prunedByExchange) {
+        board.unmakeMove();
+        continue;
       }
 
-      final MoveTransition moveTransition = board.currentPlayer().makeMove(move);
-      if (moveTransition.moveStatus().isDone()) {
-        double score;
-        if (maximizing) {
-          score = quiescenceSearch(moveTransition.toBoard(), alpha, beta, ply + 1, false);
-          if (score > alpha) alpha = score;
-        } else {
-          score = quiescenceSearch(moveTransition.toBoard(), alpha, beta, ply + 1, true);
-          if (score < beta) beta = score;
-        }
+      double score;
+      try {
+        score = quiescenceSearch(board, alpha, beta, ply + 1, !maximizing);
+      } finally {
+        board.unmakeMove();
+      }
 
-        if (alpha >= beta) {
-          transpositionTable.store(zobristHash, maximizing ? beta : alpha, 0,
-                  maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND, null);
-          return maximizing ? beta : alpha;
-        }
+      if (maximizing) {
+        if (score > alpha) alpha = score;
+      } else {
+        if (score < beta) beta = score;
+      }
+
+      if (alpha >= beta) {
+        transpositionTable.store(zobristHash, maximizing ? beta : alpha, 0,
+            maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND, null);
+        return maximizing ? beta : alpha;
       }
     }
 
@@ -1061,22 +1074,6 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
     transpositionTable.store(zobristHash, finalScore, 0, nodeType, null);
     return finalScore;
-  }
-
-  /**
-   * Creates a board position where the current player passes their turn (null move).
-   * Used for null move pruning in the search algorithm.
-   *
-   * @param board The current board position.
-   * @return A new board with the same position but opposite side to move.
-   */
-  private Board makeNullMove(Board board) {
-    Board.Builder builder = new Board.Builder();
-    for (Piece piece : board.getAllPieces()) {
-      builder.setPiece(piece);
-    }
-    builder.setMoveMaker(board.currentPlayer().getOpponent().getAlliance());
-    return builder.build();
   }
 
   /**
