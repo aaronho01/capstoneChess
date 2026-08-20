@@ -3,9 +3,7 @@ package engine.forBoard;
 import engine.forPiece.King;
 import engine.forPiece.Piece;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 import static engine.forBoard.Move.MoveFactory.getNullMove;
@@ -209,25 +207,6 @@ public enum BoardUtils {
   }
 
   /**
-   * Retrieves the last N moves from the move history of a board.
-   * Useful for analyzing recent game history and detecting patterns.
-   *
-   * @param board The board to retrieve moves from.
-   * @param N The number of moves to retrieve.
-   * @return A list of the last N moves, or fewer if the history contains fewer moves.
-   */
-  public static List<Move> lastNMoves(final Board board, int N) {
-    final List<Move> moveHistory = new ArrayList<>();
-    Move currentMove = board.getTransitionMove();
-    int i = 0;
-    while (currentMove != getNullMove() && i < N) {
-      moveHistory.add(currentMove);
-      currentMove = currentMove.getBoard().getTransitionMove();
-      i++;
-    } return Collections.unmodifiableList(moveHistory);
-  }
-
-  /**
    * Checks if the current board is in an endgame state, either checkmate or stalemate.
    * An endgame state means the game is over.
    *
@@ -241,13 +220,13 @@ public enum BoardUtils {
 
   /**
    * Checks if the current game is in the opening stage.
-   * This is determined by the number of moves played so far, with fewer than 12 moves
+   * This is determined by the number of plies played so far, with fewer than 12 plies
    * indicating the opening phase.
    *
    * @param board The current state of the board.
    * @return True if the game is in the opening phase, false otherwise.
    */
   public static boolean isOpening(final Board board) {
-    return lastNMoves(board, 100).size() < 12;
+    return board.getPlyCount() < 12;
   }
 }
