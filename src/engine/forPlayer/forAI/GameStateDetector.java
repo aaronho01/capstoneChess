@@ -1,8 +1,6 @@
 package engine.forPlayer.forAI;
 
 import engine.forBoard.Board;
-import engine.forBoard.BoardUtils;
-import engine.forBoard.Move;
 import engine.forPiece.*;
 
 import java.util.*;
@@ -178,17 +176,13 @@ public class GameStateDetector {
   }
 
   /**
-   * Calculates the approximate number of moves that have been made in the game.
+   * Returns the number of plies played on this board since it was constructed.
    *
    * @param board The current chess board.
-   * @return An approximation of the number of moves made.
+   * @return The number of plies played so far.
    */
   private int calculateMoveCount(final Board board) {
-    List<Move> moveHistory = BoardUtils.lastNMoves(board, 100);
-
-    int capturedPieces = 32 - board.getAllPieces().size();
-
-    return moveHistory.size() + (capturedPieces / 2);
+    return board.getPlyCount();
   }
 
   /**

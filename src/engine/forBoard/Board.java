@@ -105,8 +105,9 @@ public final class Board {
     this.currentPlayer = builder.nextMoveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
     this.transitionMove = builder.transitionMove != null ? builder.transitionMove : getNullMove();
     this.zobristHash = builder.zobristHash != 0 ? builder.zobristHash :
-            ZobristHashing.calculateBoardHash(this);
+        ZobristHashing.calculateBoardHash(this);
     this.halfMoveClock = builder.halfMoveClock;
+    this.plyCount = builder.plyCount;
     this.positionCounts.put(this.zobristHash, 1);
   }
 
@@ -135,6 +136,7 @@ public final class Board {
     this.transitionMove = source.transitionMove;
     this.zobristHash = source.zobristHash;
     this.halfMoveClock = source.halfMoveClock;
+    this.plyCount = source.plyCount;
     this.positionCounts.putAll(source.positionCounts);
     refreshPlayers(source.currentPlayer.getAlliance());
   }
@@ -301,6 +303,16 @@ public final class Board {
   }
 
   /**
+   * Returns the number of plies played on this board since it was constructed, through
+   * {@link #makeMove(Move)}. Not advanced by {@link #makeNullMove()}.
+   *
+   * @return The current ply count.
+   */
+  public int getPlyCount() {
+    return this.plyCount;
+  }
+
+  /**
    * Returns how many times the current position's Zobrist hash has been reached along the path
    * of moves applied through {@link #makeMove(Move)} since this board was constructed. A return
    * value of one means the current position is new to this path.
@@ -344,6 +356,14 @@ public final class Board {
   }
 
   /**
+   * The number of plies played on this board since it was constructed, advanced by
+   * {@link #makeMove(Move)} and reversed by {@link #unmakeMove()}. Not advanced by
+   * {@link #makeNullMove()}, since a null move is synthetic and is only ever applied to a
+   * private search copy, never to the board a game is actually played on.
+   */
+  private int plyCount;
+
+  /**
    * Applies the given move to this board in place: relocates pieces, updates the Zobrist hash,
    * en passant state, halfmove clock, and transition move, refreshes both players against the
    * resulting position, and pushes an undo record onto this board's undo stack.
@@ -360,6 +380,7 @@ public final class Board {
     refreshPlayers(nextMover);
     this.undoStack.push(undo);
     this.positionCounts.merge(this.zobristHash, 1, Integer::sum);
+    this.plyCount++;
   }
 
   /**
@@ -379,6 +400,7 @@ public final class Board {
     final UndoState undo = this.undoStack.pop();
     undo.appliedMove().unmakeMove(this, undo);
     refreshPlayers(undo.priorMoveMaker());
+    this.plyCount--;
   }
 
   /**
@@ -632,6 +654,8 @@ public final class Board {
     private long zobristHash;
     /** The halfmove clock for the board being built, defaulting to zero. */
     private int halfMoveClock;
+    /** The ply count for the board being built, defaulting to zero for a freshly started game. */
+    private int plyCount;
 
     /*** Constructs a new Builder instance with empty configurations. */
     public Builder() {
@@ -695,6 +719,16 @@ public final class Board {
      */
     public void setHalfMoveClock(final int halfMoveClock) {
       this.halfMoveClock = halfMoveClock;
+    }
+
+    /**
+     * Sets the ply count for the board being built, for {@link Board#getPlyCount()}. Defaults
+     * to zero, which is correct for a freshly started game.
+     *
+     * @param plyCount The number of plies already played.
+     */
+    public void setPlyCount(final int plyCount) {
+      this.plyCount = plyCount;
     }
 
     /**
