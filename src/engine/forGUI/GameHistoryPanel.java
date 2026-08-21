@@ -45,19 +45,13 @@ class GameHistoryPanel extends JPanel {
     this.setVisible(true);
   }
 
-  /**
-   * Updates the move history panel to display the latest move made in the game.
-   * Adds the move text to the appropriate column based on the player's alliance
-   * and indicates check or checkmate if applicable.
-   *
-   * @param board       The current game board after the move.
-   * @param moveHistory The move history log containing all previous moves.
-   */
   void redo(final Board board, final MoveLog moveHistory) {
     int currentRow = 0;
     this.model.clear();
-    for (final Move move: moveHistory.getMoves()) {
-      final String moveText = move.toString();
+    final List<Move> moves = moveHistory.getMoves();
+    for (int i = 0; i < moves.size(); i++) {
+      final Move move = moves.get(i);
+      final String moveText = moveHistory.getNotation(i);
       if (move.getMovedPiece().getPieceAllegiance().isWhite()) {
         this.model.setValueAt(moveText, currentRow, 0);
       } else if (move.getMovedPiece().getPieceAllegiance().isBlack()) {
@@ -65,9 +59,10 @@ class GameHistoryPanel extends JPanel {
         currentRow++;
       }
     }
-    if (!moveHistory.getMoves().isEmpty()) {
-      final Move lastMove = moveHistory.getMoves().get(moveHistory.size() - 1);
-      final String moveText = lastMove.toString();
+    if (!moves.isEmpty()) {
+      final int lastIndex = moves.size() - 1;
+      final Move lastMove = moves.get(lastIndex);
+      final String moveText = moveHistory.getNotation(lastIndex);
       if (lastMove.getMovedPiece().getPieceAllegiance().isWhite()) {
         this.model.setValueAt(moveText + calculateCheckAndCheckMateHash(board), currentRow, 0);
       } else if (lastMove.getMovedPiece().getPieceAllegiance().isBlack()) {

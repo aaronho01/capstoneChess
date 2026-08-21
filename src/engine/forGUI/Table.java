@@ -497,9 +497,10 @@ public final class Table extends Observable {
     public void done() {
       try {
         final Move bestMove = get();
+        final String notation = bestMove.toNotation(Table.get().getGameBoard());
         Table.get().updateComputerMove(bestMove);
         Table.get().getGameBoard().makeMove(bestMove);
-        Table.get().getMoveLog().addMove(bestMove);
+        Table.get().getMoveLog().addMove(bestMove, notation);
       } catch (final Exception e) {
         System.out.println("Exception in AI move handling!");
         e.printStackTrace();
@@ -598,16 +599,27 @@ public final class Table extends Observable {
   }
 
   /**
-   * The MoveLog class represents a log of moves made during a chess game.
+   * The MoveLog class represents a log of moves made during a chess game, together with the
+   * algebraic notation each move was rendered with at the time it was played.
    */
   public static class MoveLog {
 
     /** A list of moves to be used in the move log. */
     private final List <Move> moves;
 
+    /**
+     * The algebraic notation for each logged move, held in the same order as {@link #moves} and
+     * captured at the moment the move was played. Notation is frozen here rather than rendered
+     * on demand because disambiguation has to be resolved against the position the move was
+     * played from, and under the mutable board model that position no longer exists once the
+     * game moves on. Every mutator on this class must keep the two lists in step.
+     */
+    private final List <String> notations;
+
     /** Constructs a new MoveLog. */
     MoveLog() {
-      this.moves = new LinkedList <>();
+      this.moves = new ArrayList <>();
+      this.notations = new ArrayList <>();
     }
 
     /**
@@ -620,12 +632,24 @@ public final class Table extends Observable {
     }
 
     /**
-     * Adds a move to the MoveLog.
+     * Gets the notation captured for the move at the given index.
+     *
+     * @param index The index of the move.
+     * @return The algebraic notation that move was rendered with when it was played.
+     */
+    public String getNotation(final int index) {
+      return this.notations.get(index);
+    }
+
+    /**
+     * Adds a move to the MoveLog, along with the notation it was rendered with.
      *
      * @param move The move to be added.
+     * @param notation The algebraic notation for the move, rendered against the position it was played from.
      */
-    void addMove(final Move move) {
+    void addMove(final Move move, final String notation) {
       this.moves.add(move);
+      this.notations.add(notation);
     }
 
     /**
@@ -642,6 +666,7 @@ public final class Table extends Observable {
      */
     void clear() {
       this.moves.clear();
+      this.notations.clear();
     }
 
     /**
@@ -651,16 +676,8 @@ public final class Table extends Observable {
      * @return The removed move.
      */
     Move removeMove(final int index) {
+      this.notations.remove(index);
       return this.moves.remove(index);
-    }
-
-    /**
-     * Removes a specific move from the MoveLog.
-     *
-     * @param move The move to be removed.
-     */
-    void removeMove(final Move move) {
-      this.moves.remove(move);
     }
   }
 
@@ -705,11 +722,12 @@ public final class Table extends Observable {
               final Move move = createMove(chessBoard, sourceTile.getPiecePosition(), tileId);
               if (move != getNullMove() &&
                   move.getMovedPiece().getPieceAllegiance() == chessBoard.currentPlayer().getAlliance()) {
+                final String notation = move.toNotation(chessBoard);
                 chessBoard.makeMove(move);
                 if (chessBoard.currentPlayer().getOpponent().isInCheck()) {
                   chessBoard.unmakeMove();
                 } else {
-                  moveLog.addMove(move);
+                  moveLog.addMove(move, notation);
                 }
               } sourceTile = null;
               humanMovedPiece = null;

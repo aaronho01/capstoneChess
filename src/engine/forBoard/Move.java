@@ -362,19 +362,44 @@ public abstract class Move {
   }
 
   /**
-   * Generates disambiguation information for moves involving pieces of the same type.
-   * When multiple pieces of the same type can move to the same destination, this method
-   * provides the file letter to distinguish between them in algebraic notation.
+   * Generates disambiguation information for moves involving pieces of the same type, resolved
+   * against the position the move is being played from.
+   *
+   * @param position The board as it stood immediately before this move was made.
+   * @return The disambiguation file character, or an empty string if disambiguation is not needed.
+   */
+  String disambiguationFile(final Board position) {
+    for (final Move move: position.currentPlayer().getLegalMoves()) {
+      if (move.getDestinationCoordinate() == this.destinationCoordinate && !this.equals(move) &&
+          this.movedPiece.getPieceType().equals(move.getMovedPiece().getPieceType())) {
+        return BoardUtils.getPositionAtCoordinate(this.movedPiece.getPiecePosition()).substring(0, 1);
+      }
+    } return "";
+  }
+
+  /**
+   * Generates disambiguation information against this move's own board reference. Under the
+   * mutable board model that reference is the single live board rather than a frozen snapshot
+   * of the position this move belongs to, so this is only meaningful before that board has been
+   * mutated. Anything that needs stable notation should use {@link #toNotation(Board)}.
    *
    * @return The disambiguation file character, or an empty string if disambiguation is not needed.
    */
   String disambiguationFile() {
-    for (final Move move: this.board.currentPlayer().getLegalMoves()) {
-      if (move.getDestinationCoordinate() == this.destinationCoordinate && !this.equals(move) &&
-              this.movedPiece.getPieceType().equals(move.getMovedPiece().getPieceType())) {
-        return BoardUtils.getPositionAtCoordinate(this.movedPiece.getPiecePosition()).substring(0, 1);
-      }
-    } return "";
+    return disambiguationFile(this.board);
+  }
+
+  /**
+   * Renders this move in algebraic notation as it reads from the given position. Callers that
+   * need notation to stay correct after the board moves on must call this before mutating the
+   * board and keep the returned string, since re-rendering later will resolve disambiguation
+   * against whatever position the board has since reached.
+   *
+   * @param position The board as it stood immediately before this move was made.
+   * @return The algebraic notation for this move.
+   */
+  public String toNotation(final Board position) {
+    return toString();
   }
 
   /**
@@ -689,6 +714,18 @@ public abstract class Move {
       return movedPiece.getPieceType().toString() + disambiguationFile() +
               BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
     }
+
+    /**
+     * Generates a string representation of the major move, disambiguated against the given position.
+     *
+     * @param position The board as it stood immediately before this move was made.
+     * @return The string representing the move, e.g., "Qd4" for a queen move to d4.
+     */
+    @Override
+    public String toNotation(final Board position) {
+      return movedPiece.getPieceType().toString() + disambiguationFile(position) +
+          BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
+    }
   }
 
   /**
@@ -759,6 +796,19 @@ public abstract class Move {
     public String toString() {
       return movedPiece.getPieceType() + disambiguationFile() + "x" +
               BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
+    }
+
+    /**
+     * Generates a string representation of the major attack move, disambiguated against the
+     * given position.
+     *
+     * @param position The board as it stood immediately before this move was made.
+     * @return The string representing the move, e.g., "Qxd4" for a queen capturing a piece on d4.
+     */
+    @Override
+    public String toNotation(final Board position) {
+      return movedPiece.getPieceType() + disambiguationFile(position) + "x" +
+          BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
     }
   }
 
