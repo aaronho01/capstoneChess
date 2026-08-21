@@ -29,23 +29,6 @@ public class MoveUtils {
   public static final Move NULL_MOVE = new Move.NullMove();
 
   /**
-   * Computes the exchange score of a given move, indicating the relative value of pieces involved in the move.
-   * Higher exchange scores suggest advantageous exchanges for the player. This method recursively evaluates
-   * the sequence of captures that could follow from the initial move.
-   *
-   * @param move The move for which the exchange score is calculated.
-   * @return The computed exchange score for the move.
-   */
-  public static int exchangeScore(final Move move) {
-    int score = 0;
-    Move currentMove = move;
-    while (currentMove != Move.MoveFactory.getNullMove()) {
-      score += currentMove.isAttack() ? 5 : 1;
-      currentMove = currentMove.getBoard().getTransitionMove();
-    } return score;
-  }
-
-  /**
    * The Line class represents a sequence of integer coordinates forming a line on the chess board.
    * It is used to manage and store sequences of coordinates for move generation, particularly for
    * sliding pieces like bishops, rooks, and queens that can move along directional lines.

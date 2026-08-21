@@ -30,7 +30,13 @@ import static engine.forBoard.Board.Builder;
  */
 public abstract class Move {
 
-  /** The current state of the chess board. */
+  /**
+   * The board this move was generated against. Under the mutable board model this is a live
+   * board that will have moved on by the time anything reads it back, not a frozen snapshot of
+   * the position the move belongs to. It is meaningful only before that board is mutated. In
+   * particular, walking backwards through game history via getBoard().getTransitionMove() no
+   * longer terminates, since a move's board reports that same move as its transition move.
+   */
   protected Board board;
 
   /** The destination coordinate of the move. */
@@ -109,9 +115,10 @@ public abstract class Move {
   }
 
   /**
-   * Gets the current state of the chess board.
+   * Gets the board this move was generated against. See {@link #board} for the constraints on
+   * using it: it is a live mutable board, not a snapshot of the position this move belongs to.
    *
-   * @return The current board.
+   * @return The board this move was generated against.
    */
   public Board getBoard() {
     return this.board;
