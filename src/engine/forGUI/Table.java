@@ -465,7 +465,7 @@ public final class Table extends Observable {
   /**
    * The AIThinkTank class is an asynchronous worker responsible for AI move calculation and execution.
    */
-  private static class AIThinkTank extends SwingWorker < Move, String > {
+  private static class AIThinkTank extends SwingWorker <Move, String> {
 
     /** The executor service for managing AI computation threads. */
     private final ExecutorService executorService;
@@ -497,10 +497,15 @@ public final class Table extends Observable {
     public void done() {
       try {
         final Move bestMove = get();
-        final String notation = bestMove.toNotation(Table.get().getGameBoard());
+        final Board board = Table.get().getGameBoard();
+        final String notation = bestMove.toNotation(board);
         Table.get().updateComputerMove(bestMove);
-        Table.get().getGameBoard().makeMove(bestMove);
+        board.makeMove(bestMove);
         Table.get().getMoveLog().addMove(bestMove, notation);
+        Table.get().getGameHistoryPanel().redo(board, Table.get().getMoveLog());
+        Table.get().getBoardPanel().drawBoard(board);
+        Table.get().getDebugPanel().redo();
+        Table.get().moveMadeUpdate(PlayerType.COMPUTER);
       } catch (final Exception e) {
         System.out.println("Exception in AI move handling!");
         e.printStackTrace();
