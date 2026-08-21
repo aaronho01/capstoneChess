@@ -6,8 +6,6 @@ import engine.forPiece.Piece;
 import java.util.Arrays;
 import java.util.List;
 
-import static engine.forBoard.Move.MoveFactory.getNullMove;
-
 /**
  * The BoardUtils class provides utility methods and constants for working with a chess board.
  * It includes functions for validating coordinates, checking threats, evaluating moves,

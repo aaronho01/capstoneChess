@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static engine.forBoard.Move.MoveFactory.createMove;
+import static engine.forBoard.Move.MoveFactory.getNullMove;
 import static javax.swing.JDialog.setDefaultLookAndFeelDecorated;
 import static javax.swing.SwingUtilities.*;
 
@@ -347,11 +348,10 @@ public final class Table extends Observable {
    * Effectively resets the game to its initial state.
    */
   private void undoAllMoves() {
-    for (int i = Table.get().getMoveLog().size() - 1; i >= 0; i--) {
-      final Move lastMove = Table.get().getMoveLog().removeMove(Table.get().getMoveLog().size() - 1);
-      this.chessBoard = this.chessBoard.currentPlayer().unMakeMove(lastMove).toBoard();
-    } this.computerMove = null;
-
+    updateGameBoard(Board.createStandardBoard());
+    this.computerMove = null;
+    this.sourceTile = null;
+    this.humanMovedPiece = null;
     Table.get().getMoveLog().clear();
     Table.get().getGameHistoryPanel().redo(chessBoard, Table.get().getMoveLog());
     Table.get().getBoardPanel().drawBoard(chessBoard);
@@ -363,10 +363,9 @@ public final class Table extends Observable {
    * Clears the computer move and refreshes UI components.
    */
   private void undoLastMove() {
-    final Move lastMove = Table.get().getMoveLog().removeMove(Table.get().getMoveLog().size() - 1);
-    this.chessBoard = this.chessBoard.currentPlayer().unMakeMove(lastMove).toBoard();
+    Table.get().getMoveLog().removeMove(Table.get().getMoveLog().size() - 1);
+    this.chessBoard.unmakeMove();
     this.computerMove = null;
-    Table.get().getMoveLog().removeMove(lastMove);
     Table.get().getGameHistoryPanel().redo(chessBoard, Table.get().getMoveLog());
     Table.get().getBoardPanel().drawBoard(chessBoard);
     Table.get().getDebugPanel().redo();
@@ -474,12 +473,8 @@ public final class Table extends Observable {
       try {
         final Move bestMove = get();
         Table.get().updateComputerMove(bestMove);
-        Table.get().updateGameBoard(Table.get().getGameBoard().currentPlayer().makeMove(bestMove).toBoard());
+        Table.get().getGameBoard().makeMove(bestMove);
         Table.get().getMoveLog().addMove(bestMove);
-        Table.get().getGameHistoryPanel().redo(Table.get().getGameBoard(), Table.get().getMoveLog());
-        Table.get().getBoardPanel().drawBoard(Table.get().getGameBoard());
-        Table.get().getDebugPanel().redo();
-        Table.get().moveMadeUpdate(PlayerType.COMPUTER);
       } catch (final Exception e) {
         System.out.println("Exception in AI move handling!");
         e.printStackTrace();
@@ -683,10 +678,14 @@ public final class Table extends Observable {
               humanMovedPiece = sourceTile;
             } else {
               final Move move = createMove(chessBoard, sourceTile.getPiecePosition(), tileId);
-              final MoveTransition transition = chessBoard.currentPlayer().makeMove(move);
-              if (transition.moveStatus().isDone()) {
-                chessBoard = transition.toBoard();
-                moveLog.addMove(move);
+              if (move != getNullMove() &&
+                  move.getMovedPiece().getPieceAllegiance() == chessBoard.currentPlayer().getAlliance()) {
+                chessBoard.makeMove(move);
+                if (chessBoard.currentPlayer().getOpponent().isInCheck()) {
+                  chessBoard.unmakeMove();
+                } else {
+                  moveLog.addMove(move);
+                }
               } sourceTile = null;
               humanMovedPiece = null;
             }
