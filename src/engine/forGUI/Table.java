@@ -89,6 +89,17 @@ public final class Table extends Observable {
   /** The tile panel dimension. */
   private static final Dimension TILE_PANEL_DIMENSION = new Dimension(40, 40);
 
+  /**
+   * Cache of rendered piece icons, keyed by SVG file path. A given piece renders identically
+   * every time at a fixed tile size, so the Batik transcode is done once per distinct piece
+   * rather than once per tile per redraw. Only ever touched from the EDT, so a plain HashMap
+   * is sufficient.
+   */
+  private static final Map<String, ImageIcon> PIECE_ICON_CACHE = new HashMap<>();
+
+  /** The green dot overlay used to mark legal move destinations, loaded once on first use. */
+  private static ImageIcon greenDotIcon;
+
   /** The single instance of the Table class (singleton). */
   private static final Table Instance = new Table();
 
@@ -233,6 +244,20 @@ public final class Table extends Observable {
     final int y = (dim.height - h) / 2;
     frame.setLocation(x, y);
     frame.pack();
+  }
+
+  /**
+   * Returns the green dot overlay used to highlight legal move destinations, reading it from
+   * disk on the first call and reusing that instance afterward.
+   *
+   * @return The green dot icon.
+   * @throws IOException If the image cannot be read.
+   */
+  private static ImageIcon greenDot() throws IOException {
+    if (greenDotIcon == null) {
+      greenDotIcon = new ImageIcon(ImageIO.read(new File("art/misc/green_dot.png")));
+    }
+    return greenDotIcon;
   }
 
   /**
@@ -763,14 +788,15 @@ public final class Table extends Observable {
      * @param board The current state of the chess board.
      */
     private void highlightLegals(final Board board) {
-      if (Table.get().getHighlightLegalMoves()) {
-        for (final Move move: pieceLegalMoves(board)) {
-          if (move.getDestinationCoordinate() == this.tileId) {
-            try {
-              add(new JLabel(new ImageIcon(ImageIO.read(new File("art/misc/green_dot.png")))));
-            } catch (final IOException e) {
-              System.out.println("Exception in highlightLegals in Table.java");
-            }
+      if (!Table.get().getHighlightLegalMoves()) {
+        return;
+      }
+      for (final Move move : pieceLegalMoves(board)) {
+        if (move.getDestinationCoordinate() == this.tileId) {
+          try {
+            add(new JLabel(greenDot()));
+          } catch (final IOException e) {
+            System.out.println("Exception in highlightLegals in Table.java");
           }
         }
       }
@@ -789,25 +815,34 @@ public final class Table extends Observable {
     }
 
     /**
-     * Assigns the appropriate piece icon to the tile based on the current board state.
+     * Assigns the appropriate piece icon to the tile based on the current board state, reusing
+     * a previously rendered icon for that piece when one is available.
      *
      * @param board The current state of the chess board.
      */
     private void assignTilePieceIcon(final Board board) {
       this.removeAll();
-      if (board.getPiece(this.tileId) != null) {
-        try {
-          String svgFilePath = pieceIconPath +
-                  board.getPiece(this.tileId).getPieceAllegiance().toString().charAt(0) +
-                  board.getPiece(this.tileId).toString() +
-                  ".svg";
-
-          BufferedImage image = renderSvgToImage(new File(svgFilePath), TILE_PANEL_DIMENSION.width);
-          add(new JLabel(new ImageIcon(image)));
-        } catch (final Exception e) {
-          System.out.println("Exception in assignTilePieceIcon in Table.java: " + e.getMessage());
-          e.printStackTrace();
-        }
+      final Piece piece = board.getPiece(this.tileId);
+      if (piece == null) {
+        return;
+      }
+      final String svgFilePath = pieceIconPath +
+          piece.getPieceAllegiance().toString().charAt(0) +
+          piece +
+          ".svg";
+      final ImageIcon cached = PIECE_ICON_CACHE.get(svgFilePath);
+      if (cached != null) {
+        add(new JLabel(cached));
+        return;
+      }
+      try {
+        final BufferedImage image = renderSvgToImage(new File(svgFilePath), TILE_PANEL_DIMENSION.width);
+        final ImageIcon icon = new ImageIcon(image);
+        PIECE_ICON_CACHE.put(svgFilePath, icon);
+        add(new JLabel(icon));
+      } catch (final Exception e) {
+        System.out.println("Exception in assignTilePieceIcon in Table.java: " + e.getMessage());
+        e.printStackTrace();
       }
     }
 
