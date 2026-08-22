@@ -432,20 +432,27 @@ public final class Table extends Observable {
     @Override
     public void update(final Observable o,
                        final Object arg) {
-      if (Table.get().getGameSetup().isAIPlayer(Table.get().getGameBoard().currentPlayer()) &&
-              !Table.get().getGameBoard().currentPlayer().isInCheckMate() &&
-              !Table.get().getGameBoard().currentPlayer().isInStaleMate()) {
-        System.out.println(Table.get().getGameBoard().currentPlayer() + " is thinking....");
+      final Player currentPlayer = Table.get().getGameBoard().currentPlayer();
+
+      // Checkmate and stalemate are resolved here, before the worker is started, and then read
+      // from these locals. Both answers are reached by applying moves to the game board and
+      // reversing them, so asking for either one after the worker has been handed that same board
+      // would have this thread mutating a board the worker is reading.
+      final boolean isInCheckMate = currentPlayer.isInCheckMate();
+      final boolean isInStaleMate = currentPlayer.isInStaleMate();
+
+      if (isInCheckMate) {
+        JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
+                "Game Over: Player " + currentPlayer + " is in checkmate!", "Game Over",
+                JOptionPane.INFORMATION_MESSAGE);
+      } if (isInStaleMate) {
+        JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
+                "Game Over: Player " + currentPlayer + " is in stalemate!", "Game Over",
+                JOptionPane.INFORMATION_MESSAGE);
+      } if (Table.get().getGameSetup().isAIPlayer(currentPlayer) && !isInCheckMate && !isInStaleMate) {
+        System.out.println(currentPlayer + " is thinking....");
         final AIThinkTank thinkTank = new AIThinkTank();
         thinkTank.execute();
-      } if (Table.get().getGameBoard().currentPlayer().isInCheckMate()) {
-        JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
-                "Game Over: Player " + Table.get().getGameBoard().currentPlayer() + " is in checkmate!", "Game Over",
-                JOptionPane.INFORMATION_MESSAGE);
-      } if (Table.get().getGameBoard().currentPlayer().isInStaleMate()) {
-        JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
-                "Game Over: Player " + Table.get().getGameBoard().currentPlayer() + " is in stalemate!", "Game Over",
-                JOptionPane.INFORMATION_MESSAGE);
       }
     }
   }

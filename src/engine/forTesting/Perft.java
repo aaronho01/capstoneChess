@@ -4,7 +4,6 @@ import engine.Alliance;
 import engine.forBoard.Board;
 import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
-import engine.forBoard.MoveTransition;
 import engine.forBoard.ZobristHashing;
 import engine.forPiece.Pawn;
 import engine.forPiece.Piece;
@@ -27,11 +26,11 @@ import java.util.TreeMap;
  * consistency walk is provided alongside these, since the incrementally updated hash carried by each
  * board can be checked against a hash recalculated from scratch at every node of the same tree.
  * <p>
- * {@link #perftMakeUnmake(Board, int)} walks the same tree through {@link Board#makeMove(Move)} and
- * {@link Board#unmakeMove()} on a single mutated board rather than building a new board per move.
- * It exists to validate that mutating path: running it alongside {@link #perft(Board, int)} on the
- * same position and depth, and any difference in node count means the mutating path is leaving the
- * board in a different state than the immutable path would have produced.
+ * Every walk here mutates a single board in place through {@link Board#makeMove(Move)} and
+ * {@link Board#unmakeMove()} rather than building a new board per move, which is the only way a
+ * move is applied anywhere in the engine. A node count that matches a published reference value is
+ * therefore also evidence that the unmake exactly reverses the make, since an imperfect reversal
+ * leaves a corrupted position behind for every sibling move that follows it and the count diverges.
  * This class is designed as a non-instantiable utility class with static methods.
  *
  * @author Aaron Ho
@@ -56,10 +55,15 @@ public class Perft {
    * requested depth contribute nothing, which matches the convention used by published reference
    * counts. A depth of zero counts the given position itself as a single node.
    * <p>
-   * Legality is established by executing each generated move and keeping only those transitions
-   * that complete, because the engine generates moves that may leave the moving player in check.
+   * Legality is established by applying each generated move and rejecting it if it leaves the
+   * player who just moved in check, because the engine generates moves pseudo-legally. The walk
+   * mutates a single board in place through {@link Board#makeMove(Move)} and
+   * {@link Board#unmakeMove()} rather than building a new board per move, and the given board is
+   * restored to its original state before this method returns, whether it completes normally or
+   * throws, since every unmake happens in a finally block.
    *
-   * @param board The position from which to count.
+   * @param board The position from which to count. Mutated during the walk and restored before
+   *              this method returns.
    * @param depth The number of plies to walk before counting.
    * @return The number of leaf nodes at the requested depth.
    */
@@ -69,41 +73,10 @@ public class Perft {
     }
     long nodes = 0L;
     for (final Move move : board.currentPlayer().getLegalMoves()) {
-      final MoveTransition transition = board.currentPlayer().makeMove(move);
-      if (!transition.moveStatus().isDone()) {
-        continue;
-      }
-      nodes += depth == 1 ? 1L : perft(transition.toBoard(), depth - 1);
-    }
-    return nodes;
-  }
-
-  /**
-   * Counts the leaf nodes reachable from the given position at exactly the given depth, the same
-   * as {@link #perft(Board, int)}, but by mutating a single board in place through
-   * {@link Board#makeMove(Move)} and {@link Board#unmakeMove()} instead of building a new board
-   * for every move. A depth of zero counts the given position itself as a single node.
-   * <p>
-   * Legality is established the same way {@link BoardUtils#kingThreat(Move)} establishes it
-   * elsewhere in this engine: a move is applied, and then rejected if it leaves the player who
-   * just moved in check. The given board is restored to its original state before this method
-   * returns, whether it completes normally or throws, since the unmake happens in a finally block.
-   *
-   * @param board The position from which to count. Mutated during the walk and restored before
-   *              this method returns.
-   * @param depth The number of plies to walk before counting.
-   * @return The number of leaf nodes at the requested depth.
-   */
-  public static long perftMakeUnmake(final Board board, final int depth) {
-    if (depth <= 0) {
-      return 1L;
-    }
-    long nodes = 0L;
-    for (final Move move : board.currentPlayer().getLegalMoves()) {
       board.makeMove(move);
       try {
         if (!board.currentPlayer().getOpponent().isInCheck()) {
-          nodes += depth == 1 ? 1L : perftMakeUnmake(board, depth - 1);
+          nodes += depth == 1 ? 1L : perft(board, depth - 1);
         }
       } finally {
         board.unmakeMove();
@@ -118,7 +91,8 @@ public class Perft {
    * this breakdown against a reference engine identifies the branch responsible for a discrepancy.
    * Moves are keyed by long algebraic notation and ordered by that notation for readable output.
    *
-   * @param board The position whose root moves are to be broken down.
+   * @param board The position whose root moves are to be broken down. Mutated during the walk and
+   *              restored before this method returns.
    * @param depth The number of plies to walk before counting, which must be at least one.
    * @return An ordered map of long algebraic notation to the node count contributed by that move.
    */
@@ -128,12 +102,16 @@ public class Perft {
       return subtotals;
     }
     for (final Move move : board.currentPlayer().getLegalMoves()) {
-      final MoveTransition transition = board.currentPlayer().makeMove(move);
-      if (!transition.moveStatus().isDone()) {
-        continue;
+      board.makeMove(move);
+      try {
+        if (board.currentPlayer().getOpponent().isInCheck()) {
+          continue;
+        }
+        final long nodes = depth == 1 ? 1L : perft(board, depth - 1);
+        subtotals.merge(longAlgebraicNotation(move, board), nodes, Long::sum);
+      } finally {
+        board.unmakeMove();
       }
-      final long nodes = depth == 1 ? 1L : perft(transition.toBoard(), depth - 1);
-      subtotals.merge(longAlgebraicNotation(move, transition.toBoard()), nodes, Long::sum);
     }
     return subtotals;
   }
@@ -143,13 +121,14 @@ public class Perft {
    * This is provided separately because a wrong move count in the position under examination is the
    * most common cause of a failing perft, and reading it directly avoids a recursive walk.
    *
-   * @param board The position whose legal moves are to be counted.
+   * @param board The position whose legal moves are to be counted. Mutated during the count and
+   *              restored before this method returns.
    * @return The number of legal moves available to the player about to move.
    */
   public static int countLegalMoves(final Board board) {
     int legalMoves = 0;
     for (final Move move : board.currentPlayer().getLegalMoves()) {
-      if (board.currentPlayer().makeMove(move).moveStatus().isDone()) {
+      if (board.isLegal(move)) {
         legalMoves++;
       }
     }
@@ -162,25 +141,35 @@ public class Perft {
    * because the transposition table treats equal hashes as equal positions, and an incremental
    * update that drifts from the true hash silently corrupts every table lookup that follows.
    *
-   * @param board The position from which to begin the walk.
+   * The divergent position is returned as a copy rather than as the walked board itself, because
+   * the walk mutates one board in place and unwinds it on the way out, so the board handed back to
+   * the caller would otherwise have been restored to the root by the time it was read.
+   *
+   * @param board The position from which to begin the walk. Mutated during the walk and restored
+   *              before this method returns.
    * @param depth The number of plies to walk.
-   * @return The first position whose hash is inconsistent, or null if every position agrees.
+   * @return A copy of the first position whose hash is inconsistent, or null if every position
+   *         agrees.
    */
   public static Board findZobristDivergence(final Board board, final int depth) {
     if (board.getZobristHash() != ZobristHashing.calculateBoardHash(board)) {
-      return board;
+      return board.copy();
     }
     if (depth <= 0) {
       return null;
     }
     for (final Move move : board.currentPlayer().getLegalMoves()) {
-      final MoveTransition transition = board.currentPlayer().makeMove(move);
-      if (!transition.moveStatus().isDone()) {
-        continue;
-      }
-      final Board divergentBoard = findZobristDivergence(transition.toBoard(), depth - 1);
-      if (divergentBoard != null) {
-        return divergentBoard;
+      board.makeMove(move);
+      try {
+        if (board.currentPlayer().getOpponent().isInCheck()) {
+          continue;
+        }
+        final Board divergentBoard = findZobristDivergence(board, depth - 1);
+        if (divergentBoard != null) {
+          return divergentBoard;
+        }
+      } finally {
+        board.unmakeMove();
       }
     }
     return null;

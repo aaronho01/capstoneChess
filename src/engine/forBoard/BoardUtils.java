@@ -2,8 +2,10 @@ package engine.forBoard;
 
 import engine.forPiece.King;
 import engine.forPiece.Piece;
+import engine.forPlayer.Player;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -158,16 +160,29 @@ public enum BoardUtils {
   }
 
   /**
-   * Checks if making a specific move puts the king in threat.
-   * This is used to determine if a move is legal or would leave the player in check.
+   * Checks whether making the given move would put the opposing king in check. Used for move
+   * ordering, where checking moves are worth searching early.
+   * <p>
+   * The board is taken as a parameter rather than read from the move, because a move's own board
+   * reference is a live board under the mutable board model and, at the root, is shared by every
+   * search thread. The board given here must be the board the move was generated from, or one in
+   * the same position, and must be private to the calling thread, since it is mutated and restored
+   * over the course of this call.
    *
    * @param move The move to evaluate.
-   * @return True if the move puts the king in threat, false otherwise.
+   * @param board The position the move would be played from, mutated and restored by this call.
+   * @return True if the move puts the opposing king in check, false otherwise.
    */
-  public static boolean kingThreat(final Move move) {
-    final Board board = move.getBoard();
-    final MoveTransition transition = board.currentPlayer().makeMove(move);
-    return transition.toBoard().currentPlayer().isInCheck();
+  public static boolean kingThreat(final Move move, final Board board) {
+    final Player mover = board.currentPlayer();
+    final int opponentKingSquare = mover.getOpponent().getPlayerKing().getPiecePosition();
+    final Collection<Piece> moverPieces = mover.getActivePieces();
+    final UndoState undo = move.makeMove(board);
+    try {
+      return Player.isSquareAttacked(opponentKingSquare, moverPieces, board);
+    } finally {
+      move.unmakeMove(board, undo);
+    }
   }
 
   /**

@@ -239,8 +239,21 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           }
         }
 
+        // Whether a move gives check is resolved once per move here rather than inside the
+        // comparator, which would ask the same question O(n log n) times. It is resolved against a
+        // private copy of the position because kingThreat mutates the board it is handed, and the
+        // board this sorter is given at the root is the game board the rest of the application is
+        // reading. The map is keyed by identity because Move.equals is not reliable enough to
+        // distinguish a promotion from the plain pawn move it decorates.
+        final Board probeBoard = board.copy();
+        Map<Move, Boolean> givesCheck = new IdentityHashMap<>();
+        for (Move move : sortedMoves) {
+          givesCheck.put(move, BoardUtils.kingThreat(move, probeBoard));
+        }
+
         sortedMoves.sort((move1, move2) -> ComparisonChain.start()
-                .compareTrueFirst(BoardUtils.kingThreat(move1), BoardUtils.kingThreat(move2))
+                .compareTrueFirst(givesCheck.getOrDefault(move1, false),
+                        givesCheck.getOrDefault(move2, false))
                 .compareTrueFirst(move1.isCastlingMove(), move2.isCastlingMove())
                 .compare(
                         move1.isAttack() ? seeScores.getOrDefault(move1, 0) : -1000,

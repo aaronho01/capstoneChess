@@ -450,6 +450,39 @@ public final class Board {
   }
 
   /**
+   * Returns whether the given move is legal for the side to move, meaning it does not leave that
+   * side's own king attacked. Move generation is pseudo-legal, so this is the check that separates
+   * the moves that may actually be played from the moves that merely look playable.
+   * <p>
+   * The move is applied and reversed through {@link Move#makeMove(Board)} and
+   * {@link Move#unmakeMove(Board, UndoState)} rather than through {@link #makeMove(Move)} and
+   * {@link #unmakeMove()}, deliberately. That lower pair relocates pieces and updates position
+   * state without touching this board's players, undo stack, repetition counts, or ply count, so
+   * asking this question costs neither a board construction nor a player rebuild, and leaves the
+   * cached {@link Player} objects on this board intact for the caller to keep using afterwards.
+   * The board is restored before this method returns, whether it completes normally or throws.
+   * <p>
+   * The king's square is read before the move is applied, taking the destination square when the
+   * king itself is the piece being moved, which covers castling as well since a castle move
+   * records the king as its moved piece.
+   *
+   * @param move The move to test, which must have been generated from this board's position.
+   * @return True if the move leaves the moving side's king unattacked, false otherwise.
+   */
+  public boolean isLegal(final Move move) {
+    final Player mover = this.currentPlayer;
+    final Collection<Piece> opponentPieces = mover.getOpponent().getActivePieces();
+    final int kingSquare = move.getMovedPiece().getPieceType() == Piece.PieceType.KING ?
+            move.getDestinationCoordinate() : mover.getPlayerKing().getPiecePosition();
+    final UndoState undo = move.makeMove(this);
+    try {
+      return !Player.isSquareAttacked(kingSquare, opponentPieces, this);
+    } finally {
+      move.unmakeMove(this, undo);
+    }
+  }
+
+  /**
    * Reassigns both players and the current player against this board's current piece
    * configuration. Called after every mutation, since a board mutated in place cannot rely on
    * a {@link Player} built against an earlier position the way an immutably constructed board

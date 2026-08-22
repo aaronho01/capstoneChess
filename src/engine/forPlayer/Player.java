@@ -124,14 +124,31 @@ public abstract class Player {
   }
 
   /**
-   * Determines whether this player has any legal escape moves available.
+   * Determines whether this player has any legal escape moves available, by applying each of this
+   * player's pseudo-legal moves to the board in place and keeping the first one that does not
+   * leave this player's own king attacked.
+   * <p>
+   * This is only a meaningful question to ask of the side to move, since a move can only be played
+   * from a position in which it is that side's turn. The previous implementation carried the same
+   * assumption implicitly, through a board transition that read the board's current player rather
+   * than this one, and simply returned a wrong answer if the assumption did not hold. Now that the
+   * board is mutated in place instead, the same mistake would corrupt the board rather than merely
+   * misreport, so it is checked rather than assumed.
    *
    * @return True if escape moves exist, false otherwise.
+   * @throws IllegalStateException If this player is not the side to move on its own board.
    */
   private boolean hasEscapeMoves() {
-    return getLegalMoves().stream()
-            .anyMatch(move -> makeMove(move)
-                    .moveStatus().isDone());
+    if (this.board.currentPlayer() != this) {
+      throw new IllegalStateException(
+              "Escape moves can only be tested for the side to move, not for " + getAlliance() + ".");
+    }
+    for (final Move move : getLegalMoves()) {
+      if (this.board.isLegal(move)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
