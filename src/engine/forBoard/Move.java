@@ -18,13 +18,12 @@ import static engine.forBoard.Board.Builder;
  * Different types of moves are represented by specialized subclasses, each implementing
  * the specific behavior and rules for that move type.
  * <p>
- * Alongside the existing {@link #execute()}/{@link #undo()} pair, which build an entirely new
- * {@link Board} to represent a transition, every move now also supports {@link #makeMove(Board)}
- * and {@link #unmakeMove(Board, UndoState)}, which mutate a given board in place and are reversed
- * through an {@link UndoState} rather than by holding onto a prior Board reference. Subclasses
- * whose {@link #execute()} behavior is a plain relocation do not need to override these; only
- * {@link PawnJump}, {@link PawnEnPassantAttack}, {@link CastleMove}, and {@link PawnPromotion}
- * override them, the same set of classes that already override {@link #execute()}.
+ * A move is applied through {@link #makeMove(Board)} and reversed through
+ * {@link #unmakeMove(Board, UndoState)}, which mutate a given board in place and undo that change
+ * from an {@link UndoState} rather than by holding onto a prior Board reference. Subclasses whose
+ * application is a plain relocation of the moved piece do not need to override either method; only
+ * {@link PawnJump}, {@link PawnEnPassantAttack}, {@link CastleMove}, and {@link PawnPromotion} do,
+ * because each of them changes something beyond the moved piece itself.
  *
  * @author Aaron Ho
  */
@@ -263,9 +262,10 @@ public abstract class Move {
    * board's Zobrist hash, en passant state, halfmove clock, and transition move, and returns
    * an {@link UndoState} that {@link #unmakeMove} can use to reverse exactly this change.
    * This base implementation covers a plain relocation and an ordinary capture alike, since a
-   * captured piece is simply whatever occupied the destination square beforehand; subclasses
-   * whose {@link #execute()} behavior differs from that (castling, en passant, promotion, and
-   * the en passant flag set by a pawn jump) override this method to match.
+   * captured piece is simply whatever occupied the destination square beforehand; subclasses that
+   * need to do more than that (castling, which also relocates the rook, en passant, whose captured
+   * pawn does not sit on the destination square, promotion, which replaces the moved pawn, and the
+   * pawn jump, which sets the en passant flag) override this method.
    * <p>
    * This method does not touch the board's current player or cached legal moves; the caller
    * ({@link Board#makeMove(Move)}) is responsible for refreshing those after this returns.
