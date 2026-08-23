@@ -20,9 +20,9 @@ import static engine.forBoard.Move.MoveFactory.getNullMove;
  * nothing else mutates it implicitly. In addition, a board now supports being mutated in place
  * through {@link #makeMove(Move)} and {@link #unmakeMove()}, which relocate pieces and update
  * state directly rather than constructing a new Board instance, pushing an undo record onto an
- * internal stack so the change can be exactly reversed. This mutating path exists for
- * performance-critical callers such as search and perft; callers that still want an immutable
- * transition should continue to use {@link Move#execute()}.
+ * internal stack so the change can be exactly reversed. This mutating path is the only way a
+ * move is applied anywhere in the engine; there is no longer an immutable transition that builds
+ * a fresh board per move.
  *
  * @author Aaron Ho
  * @author dareTo81
@@ -103,7 +103,7 @@ public final class Board {
     this.whitePlayer = new WhitePlayer(this, this.blackPieces);
     this.blackPlayer = new BlackPlayer(this, this.whitePieces);
     this.currentPlayer = builder.nextMoveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
-    this.transitionMove = builder.transitionMove != null ? builder.transitionMove : getNullMove();
+    this.transitionMove = getNullMove();
     this.zobristHash = builder.zobristHash != 0 ? builder.zobristHash :
         ZobristHashing.calculateBoardHash(this);
     this.halfMoveClock = builder.halfMoveClock;
@@ -681,8 +681,6 @@ public final class Board {
     private Alliance nextMoveMaker;
     /** The pawn that can be captured via en passant, if any. */
     private Pawn enPassantPawn;
-    /** The move that represents the transition to this board state. */
-    private Move transitionMove;
     /** The Zobrist hash value for the board being built. */
     private long zobristHash;
     /** The halfmove clock for the board being built, defaulting to zero. */
@@ -723,15 +721,6 @@ public final class Board {
      */
     public void setEnPassantPawn(final Pawn enPassantPawn) {
       this.enPassantPawn = enPassantPawn;
-    }
-
-    /**
-     * Sets the move transition for the board configuration.
-     *
-     * @param transitionMove The move that represents the transition between the previous and current board states.
-     */
-    public void setMoveTransition(final Move transitionMove) {
-      this.transitionMove = transitionMove;
     }
 
     /**

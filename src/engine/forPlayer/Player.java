@@ -3,7 +3,6 @@ package engine.forPlayer;
 import engine.Alliance;
 import engine.forBoard.Board;
 import engine.forBoard.Move;
-import engine.forBoard.MoveTransition;
 import engine.forPiece.King;
 import engine.forPiece.Piece;
 
@@ -19,9 +18,10 @@ import static java.util.stream.Collectors.collectingAndThen;
 /**
  * The Player class represents an abstract chess player, providing the foundation for player-specific
  * operations and game state management. Each player is associated with a board position and maintains
- * their king piece, legal moves, and check status. The class handles move execution, validation,
- * and state queries including checkmate, stalemate, and castling status. Concrete subclasses must
- * implement alliance-specific behavior for piece management and castling calculations.
+ * their king piece, legal moves, and check status. The class answers state queries including check,
+ * checkmate, stalemate, and castling status. Applying a move is not a player's responsibility;
+ * moves are applied to a board in place through {@link Board#makeMove(Move)}. Concrete subclasses
+ * must implement alliance-specific behavior for piece management and castling calculations.
  *
  * @author Aaron Ho
  * @author dareTo81
@@ -209,33 +209,6 @@ public abstract class Player {
       }
     }
     return false;
-  }
-
-  /**
-   * Executes a move and returns the resulting board transition.
-   * Validates the move legality and ensures the move does not leave the player in check.
-   *
-   * @param move The move to execute.
-   * @return A MoveTransition object containing the resulting board state and move status.
-   */
-  public MoveTransition makeMove(final Move move) {
-    if (!getLegalMoves().contains(move)) {
-      return new MoveTransition(this.board, MoveStatus.ILLEGAL_MOVE);
-    }
-    final Board transitionedBoard = move.execute();
-    return transitionedBoard.currentPlayer().getOpponent().isInCheck() ?
-            new MoveTransition(this.board, MoveStatus.LEAVES_PLAYER_IN_CHECK) :
-            new MoveTransition(transitionedBoard, MoveStatus.DONE);
-  }
-
-  /**
-   * Undoes a move and returns the previous board state.
-   *
-   * @param move The move to undo.
-   * @return A MoveTransition object containing the previous board state.
-   */
-  public MoveTransition unMakeMove(final Move move) {
-    return new MoveTransition(move.undo(), MoveStatus.DONE);
   }
 
   /**

@@ -185,35 +185,6 @@ public abstract class Move {
   }
 
   /**
-   * Executes the move on the board and returns the resulting board.
-   * This method creates a new board state reflecting the changes from the move.
-   *
-   * @return The board after executing the move.
-   */
-  public Board execute() {
-    final Board.Builder builder = new Builder();
-    Collection<Piece> currentPlayerPieces = this.board.currentPlayer().getActivePieces();
-    for (Piece piece : currentPlayerPieces) {
-      if (piece != this.movedPiece) {
-        builder.setPiece(piece);
-      }
-    }
-
-    for (Piece piece : this.board.currentPlayer().getOpponent().getActivePieces()) {
-      builder.setPiece(piece);
-    }
-
-    builder.setPiece(this.movedPiece.movePiece(this));
-    builder.setMoveMaker(this.board.currentPlayer().getOpponent().getAlliance());
-    builder.setMoveTransition(this);
-
-    long newHash = updateZobristHash(this.board.getZobristHash());
-    builder.setZobristHash(newHash);
-
-    return builder.build();
-  }
-
-  /**
    * Updates the Zobrist hash for this move.
    * This default implementation handles standard piece movement.
    * Subclasses should override this method for special moves.
@@ -285,19 +256,6 @@ public abstract class Move {
       }
     }
     return hash;
-  }
-
-  /**
-   * Undoes the move on the board and returns the resulting board.
-   * This method creates a new board state as it was before the move.
-   *
-   * @return The board after undoing the move.
-   */
-  public Board undo() {
-    final Board.Builder builder = new Builder();
-    this.board.getAllPieces().forEach(builder::setPiece);
-    builder.setMoveMaker(this.board.currentPlayer().getAlliance());
-    return builder.build();
   }
 
   /**
@@ -620,17 +578,6 @@ public abstract class Move {
     @Override
     public int getDestinationCoordinate() {
       return -1;
-    }
-
-    /**
-     * Throws a runtime exception because a null move cannot be executed.
-     *
-     * @return A runtime exception with the message "cannot execute null move!"
-     * @throws RuntimeException Always thrown when attempting to execute a null move.
-     */
-    @Override
-    public Board execute() {
-      throw new RuntimeException("Cannot execute null move!");
     }
 
     /**
@@ -1010,39 +957,6 @@ public abstract class Move {
     }
 
     /**
-     * Executes the pawn jump move, updating the board accordingly. This method creates
-     * a new board with the pawn moved to the destination coordinate, an en passant pawn set,
-     * and the move transition recorded.
-     *
-     * @return The resulting board after the pawn jump move.
-     */
-    @Override
-    public Board execute() {
-      final Board.Builder builder = new Builder();
-
-      for (Piece piece : this.board.currentPlayer().getActivePieces()) {
-        if (piece != this.movedPiece) {
-          builder.setPiece(piece);
-        }
-      }
-
-      for (Piece piece : this.board.currentPlayer().getOpponent().getActivePieces()) {
-        builder.setPiece(piece);
-      }
-
-      final Pawn movedPawn = (Pawn) this.movedPiece.movePiece(this);
-      builder.setPiece(movedPawn);
-      builder.setEnPassantPawn(movedPawn);
-      builder.setMoveMaker(this.board.currentPlayer().getOpponent().getAlliance());
-      builder.setMoveTransition(this);
-
-      long newHash = updateZobristHash(this.board.getZobristHash());
-      builder.setZobristHash(newHash);
-
-      return builder.build();
-    }
-
-    /**
      * Updates the Zobrist hash for this pawn jump move.
      *
      * @param currentHash The current board hash.
@@ -1130,53 +1044,6 @@ public abstract class Move {
     @Override
     public boolean equals(final Object other) {
       return this == other || other instanceof PawnEnPassantAttack && super.equals(other);
-    }
-
-    /**
-     * Executes the "en passant" pawn attack move, updating the board accordingly.
-     * This method creates a new board with pieces moved and removed due to the en passant capture.
-     *
-     * @return The resulting board after the en passant capture.
-     */
-    @Override
-    public Board execute() {
-      final Board.Builder builder = new Builder();
-
-      for (Piece piece : this.board.currentPlayer().getActivePieces()) {
-        if (piece != this.movedPiece) {
-          builder.setPiece(piece);
-        }
-      }
-
-      for (Piece piece : this.board.currentPlayer().getOpponent().getActivePieces()) {
-        if (piece != this.getAttackedPiece()) {
-          builder.setPiece(piece);
-        }
-      }
-
-      builder.setPiece(this.movedPiece.movePiece(this));
-      builder.setMoveMaker(this.board.currentPlayer().getOpponent().getAlliance());
-      builder.setMoveTransition(this);
-
-      long newHash = updateZobristHash(this.board.getZobristHash());
-      builder.setZobristHash(newHash);
-
-      return builder.build();
-    }
-
-    /**
-     * Undoes the "en passant" pawn attack move, reverting the board to the state before the capture.
-     * This method restores the captured pawn and resets the board state.
-     *
-     * @return The board state before the en passant capture.
-     */
-    @Override
-    public Board undo() {
-      final Board.Builder builder = new Builder();
-      this.board.getAllPieces().forEach(builder::setPiece);
-      builder.setEnPassantPawn((Pawn) this.getAttackedPiece());
-      builder.setMoveMaker(this.board.currentPlayer().getAlliance());
-      return builder.build();
     }
 
     /**
@@ -1288,43 +1155,6 @@ public abstract class Move {
     @Override
     public int hashCode() {
       return Objects.hash(super.hashCode(), decoratedMove, promotedPawn, promotionPiece);
-    }
-
-    /**
-     * Executes the pawn promotion move by first executing the decorated move and then
-     * replacing the promoted pawn with the promoted piece.
-     *
-     * @return The resulting board after executing the pawn promotion move.
-     */
-    @Override
-    public Board execute() {
-      final Board pawnMovedBoard = this.decoratedMove.execute();
-      final Board.Builder builder = new Builder();
-
-      for (Piece piece : pawnMovedBoard.currentPlayer().getActivePieces()) {
-        if (piece != this.promotedPawn) {
-          builder.setPiece(piece);
-        }
-      }
-
-      for (Piece piece : pawnMovedBoard.currentPlayer().getOpponent().getActivePieces()) {
-        builder.setPiece(piece);
-      }
-
-      builder.setPiece(this.promotionPiece.movePiece(this));
-      builder.setMoveMaker(pawnMovedBoard.currentPlayer().getAlliance());
-      builder.setMoveTransition(this);
-
-      long newHash = pawnMovedBoard.getZobristHash();
-      newHash = ZobristHashing.updateHashPromotion(
-              newHash,
-              this.promotedPawn,
-              this.promotionPiece,
-              this.getDestinationCoordinate()
-      );
-      builder.setZobristHash(newHash);
-
-      return builder.build();
     }
 
     /**
@@ -1463,34 +1293,6 @@ public abstract class Move {
     @Override
     public boolean isCastlingMove() {
       return true;
-    }
-
-    /**
-     * Executes the castling move on the chess board. This method creates a new board with
-     * the pieces moved as part of the castling move, records the move transition, and
-     * updates the board state accordingly.
-     *
-     * @return The resulting board after the castling move.
-     */
-    @Override
-    public Board execute() {
-      final Board.Builder builder = new Builder();
-
-      for (final Piece piece: this.board.getAllPieces()) {
-        if (piece != this.movedPiece && piece != this.castleRook) {
-          builder.setPiece(piece);
-        }
-      }
-
-      builder.setPiece(this.movedPiece.movePiece(this));
-      builder.setPiece(new Rook(this.castleRook.getPieceAllegiance(), this.castleRookDestination, false, 1));
-      builder.setMoveMaker(this.board.currentPlayer().getOpponent().getAlliance());
-      builder.setMoveTransition(this);
-
-      long newHash = updateZobristHash(this.board.getZobristHash());
-      builder.setZobristHash(newHash);
-
-      return builder.build();
     }
 
     /**
