@@ -368,50 +368,6 @@ public abstract class Move {
   }
 
   /**
-   * Represents the possible outcomes of a chess move, including successful execution,
-   * an illegal move, or leaving the player's king in check. Each status indicates whether
-   * a move is considered done or has specific implications on the game state.
-   */
-  public enum MoveStatus {
-    /**
-     * Represents a successfully executed move.
-     */
-    DONE {
-      @Override
-      public boolean isDone() {
-        return true;
-      }
-    },
-
-    /**
-     * Represents an illegal move that cannot be executed.
-     */
-    ILLEGAL_MOVE {
-      @Override
-      public boolean isDone() {
-        return false;
-      }
-    },
-
-    /**
-     * Represents a move that would leave the player's king in check.
-     */
-    LEAVES_PLAYER_IN_CHECK {
-      @Override
-      public boolean isDone() {
-        return false;
-      }
-    };
-
-    /**
-     * Checks if the move status indicates that the move is done and valid.
-     *
-     * @return True if the move is done, false otherwise.
-     */
-    public abstract boolean isDone();
-  }
-
-  /**
    * The AttackMove class represents a move that results in attacking an opponent's piece in chess.
    * This abstract class provides the base functionality for all types of attack moves.
    */
