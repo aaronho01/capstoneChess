@@ -4,10 +4,7 @@ import engine.forPiece.Pawn;
 import engine.forPiece.Piece;
 import engine.forPiece.Rook;
 
-import java.util.Collection;
 import java.util.Objects;
-
-import static engine.forBoard.Board.Builder;
 
 /**
  * The Move class represents a move in a game of chess.
@@ -270,8 +267,10 @@ public abstract class Move {
    * This method does not touch the board's current player or cached legal moves; the caller
    * ({@link Board#makeMove(Move)}) is responsible for refreshing those after this returns.
    *
-   * @param board The board to mutate, which must be the same board this move was generated
-   *              from, since {@link #updateZobristHash} reads that board's state directly.
+   * @param board The board to mutate, which need not be the instance this move was generated
+   *              from but must stand in the same position as it, since
+   *              {@link #updateZobristHash} reads castling rights and en passant state from the
+   *              board this move was generated against rather than from this parameter.
    * @return The undo state needed to reverse this move.
    */
   public UndoState makeMove(final Board board) {

@@ -19,8 +19,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import static engine.forBoard.Move.MoveFactory.createMove;
 import static engine.forBoard.Move.MoveFactory.getNullMove;
@@ -474,26 +472,47 @@ public final class Table extends Observable {
    */
   private static class AIThinkTank extends SwingWorker <Move, String> {
 
-    /** The executor service for managing AI computation threads. */
-    private final ExecutorService executorService;
+    /**
+     * The position the search runs against, copied from the game board when this worker is
+     * constructed. The search reads a board heavily, taking the root move list from it and
+     * copying it once per search thread, while the event dispatch thread goes on mutating the
+     * game board through undo and new game. Neither the board's piece collections nor its
+     * players' lazily cached legal move lists carry any synchronization, so the two threads must
+     * not be looking at the same object.
+     */
+    private final Board searchBoard;
 
-    /** Constructs an instance of AIThinkTank. */
+    /** The search depth, read from the game setup dialog when this worker is constructed. */
+    private final int searchDepth;
+
+    /** The panel the search reports its per-depth progress to. */
+    private final DebugPanel debugPanel;
+
+    /**
+     * Constructs an instance of AIThinkTank, taking its private copy of the position and
+     * everything else the search needs up front. This constructor runs on the event dispatch
+     * thread, which is what makes reading the game board and the setup dialog's spinner here
+     * safe. Neither may be read from {@link #doInBackground}.
+     */
     private AIThinkTank() {
-      this.executorService = Executors.newFixedThreadPool(1);
+      this.searchBoard = Table.get().getGameBoard().copy();
+      this.searchDepth = Table.get().getGameSetup().getSearchDepth();
+      this.debugPanel = Table.get().getDebugPanel();
     }
 
     /**
-     * Performs AI move calculation in the background.
+     * Performs AI move calculation in the background, against this worker's private copy of the
+     * position. This method deliberately reaches for nothing outside its own fields: everything
+     * it needs was captured on the event dispatch thread in the constructor, and that is the
+     * property that keeps the search off the shared game board.
      *
      * @return The best move calculated by the AI.
      */
     @Override
     protected Move doInBackground() {
-      final Move bestMove;
-      final AlphaBeta strategy = new AlphaBeta(Table.get().getGameSetup().getSearchDepth(), Table.get().getGameBoard());
-      strategy.addObserver(Table.get().getDebugPanel());
-      bestMove = strategy.execute(Table.get().getGameBoard());
-      return bestMove;
+      final AlphaBeta strategy = new AlphaBeta(this.searchDepth, this.searchBoard);
+      strategy.addObserver(this.debugPanel);
+      return strategy.execute(this.searchBoard);
     }
 
     /**
@@ -516,8 +535,6 @@ public final class Table extends Observable {
       } catch (final Exception e) {
         System.out.println("Exception in AI move handling!");
         e.printStackTrace();
-      } finally {
-        executorService.shutdown();
       }
     }
   }
