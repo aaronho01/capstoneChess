@@ -72,6 +72,21 @@ public final class Table extends Observable {
   /** Indicates whether legal moves should be highlighted on the board. */
   private boolean highlightLegalMoves;
 
+  /**
+   * The search currently running, or null when none is. Only ever read or written on the event
+   * dispatch thread: the watcher assigns it when it starts a worker, and the worker clears it
+   * from {@link AIThinkTank#done()}, which also runs there.
+   */
+  private AIThinkTank activeSearch;
+
+  /**
+   * Whether the watcher should be notified once the search now running has finished. A reset
+   * that happens mid-search cannot notify the watcher on the spot, because that would start a
+   * second search alongside the one already running, each with its own transposition table and
+   * its own pool of search threads.
+   */
+  private boolean restartEngineAfterSearch;
+
   /** The color of light tiles on the chess board. */
   private final Color lightTileColor = Color.decode("#FFFACD");
 
@@ -358,6 +373,42 @@ public final class Table extends Observable {
   }
 
   /**
+   * Records the search now running, so that a reset arriving mid-search can tell it must wait
+   * rather than start a second search alongside it.
+   *
+   * @param search The worker that has just been started.
+   */
+  private void setActiveSearch(final AIThinkTank search) {
+    this.activeSearch = search;
+  }
+
+  /** Clears the record of the running search, called from the worker as it finishes. */
+  private void clearActiveSearch() {
+    this.activeSearch = null;
+  }
+
+  /**
+   * Returns whether a search is running right now.
+   *
+   * @return True if a worker has been started and has not yet finished.
+   */
+  private boolean isSearchRunning() {
+    return this.activeSearch != null;
+  }
+
+  /**
+   * Notifies the watcher if a reset asked for the engine to be restarted while a search was
+   * running, so the engine picks up the position that reset produced. Clears the request as it
+   * consumes it.
+   */
+  private void restartEngineIfRequested() {
+    if (this.restartEngineAfterSearch) {
+      this.restartEngineAfterSearch = false;
+      moveMadeUpdate(PlayerType.HUMAN);
+    }
+  }
+
+  /**
    * Updates the internal state of the computer's chosen move.
    *
    * @param move The move chosen by the computer player.
@@ -379,6 +430,11 @@ public final class Table extends Observable {
     Table.get().getGameHistoryPanel().redo(chessBoard, Table.get().getMoveLog());
     Table.get().getBoardPanel().drawBoard(chessBoard);
     Table.get().getDebugPanel().redo();
+    if (isSearchRunning()) {
+      this.restartEngineAfterSearch = true;
+    } else {
+      moveMadeUpdate(PlayerType.HUMAN);
+    }
   }
 
   /**
@@ -445,6 +501,7 @@ public final class Table extends Observable {
       } if (Table.get().getGameSetup().isAIPlayer(currentPlayer) && !isInCheckMate && !isInStaleMate) {
         System.out.println(currentPlayer + " is thinking....");
         final AIThinkTank thinkTank = new AIThinkTank();
+        Table.get().setActiveSearch(thinkTank);
         thinkTank.execute();
       }
     }
@@ -543,15 +600,16 @@ public final class Table extends Observable {
     }
 
     /**
-     * Handles the completion of the AI move calculation.
-     * Updates the game state with the calculated move and refreshes the UI.
+     * Handles the completion of the AI move calculation, applying the move the search found to
+     * the game board and refreshing the UI, unless the position the search was run against has
+     * since changed.
      */
     @Override
     public void done() {
+      Table.get().clearActiveSearch();
       try {
         final Move bestMove = get();
         final Board board = Table.get().getGameBoard();
-
         assert this.searchBoard.getZobristHash() == this.zobristHashAtStart :
             "The search left its own board somewhere other than the position it was handed.";
 
@@ -575,6 +633,8 @@ public final class Table extends Observable {
       } catch (final Exception e) {
         System.out.println("Exception in AI move handling!");
         e.printStackTrace();
+      } finally {
+        Table.get().restartEngineIfRequested();
       }
     }
   }
