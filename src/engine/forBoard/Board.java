@@ -317,39 +317,6 @@ public final class Board {
   }
 
   /**
-   * Returns how many times the current position's Zobrist hash has been reached along the path
-   * of moves applied through {@link #makeMove(Move)} since this board was constructed. A return
-   * value of one means the current position is new to this path.
-   *
-   * @return The repetition count of the current position.
-   */
-  public int repetitionCount() {
-    return this.positionCounts.getOrDefault(this.zobristHash, 0);
-  }
-
-  /**
-   * Returns whether the current position has now been reached a third time along the path of
-   * moves applied through {@link #makeMove(Move)}, the threefold repetition draw condition.
-   * This checks repetition only along this board instance's own make/unmake path; it does not
-   * consult a full game history supplied from outside that path.
-   *
-   * @return True if the current position is a threefold repetition.
-   */
-  public boolean isThreefoldRepetition() {
-    return repetitionCount() >= 3;
-  }
-
-  /**
-   * Returns whether the halfmove clock has reached the fifty-move rule threshold of one hundred
-   * plies without a pawn move or capture.
-   *
-   * @return True if the fifty-move rule now permits a draw claim.
-   */
-  public boolean isFiftyMoveRule() {
-    return this.halfMoveClock >= 100;
-  }
-
-  /**
    * Returns the hash code for this board, using the Zobrist hash value.
    *
    * @return The hash code.
