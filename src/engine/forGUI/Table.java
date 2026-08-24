@@ -431,11 +431,6 @@ public final class Table extends Observable {
     public void update(final Observable o,
                        final Object arg) {
       final Player currentPlayer = Table.get().getGameBoard().currentPlayer();
-
-      // Checkmate and stalemate are resolved here, before the worker is started, and then read
-      // from these locals. Both answers are reached by applying moves to the game board and
-      // reversing them, so asking for either one after the worker has been handed that same board
-      // would have this thread mutating a board the worker is reading.
       final boolean isInCheckMate = currentPlayer.isInCheckMate();
       final boolean isInStaleMate = currentPlayer.isInStaleMate();
 
@@ -489,13 +484,29 @@ public final class Table extends Observable {
     private final DebugPanel debugPanel;
 
     /**
+     * The game board this search was started against, held for identity comparison and never
+     * read from the background thread. If the game board has been replaced by the time the
+     * search finishes, as a new game replaces it, the position that was searched is gone.
+     */
+    private final Board gameBoard;
+
+    /** The game board's ply count when this search started. */
+    private final int plyCountAtStart;
+
+    /** The game board's Zobrist hash when this search started. */
+    private final long zobristHashAtStart;
+
+    /**
      * Constructs an instance of AIThinkTank, taking its private copy of the position and
      * everything else the search needs up front. This constructor runs on the event dispatch
      * thread, which is what makes reading the game board and the setup dialog's spinner here
      * safe. Neither may be read from {@link #doInBackground}.
      */
     private AIThinkTank() {
-      this.searchBoard = Table.get().getGameBoard().copy();
+      this.gameBoard = Table.get().getGameBoard();
+      this.plyCountAtStart = this.gameBoard.getPlyCount();
+      this.zobristHashAtStart = this.gameBoard.getZobristHash();
+      this.searchBoard = this.gameBoard.copy();
       this.searchDepth = Table.get().getGameSetup().getSearchDepth();
       this.debugPanel = Table.get().getDebugPanel();
     }
@@ -516,6 +527,22 @@ public final class Table extends Observable {
     }
 
     /**
+     * Returns whether the game has moved on from the position this search was run against. A
+     * move carries a reference to the board it was generated from and reads that board's
+     * castling rights and en passant state while computing its hash update, so applying a move
+     * to a board that no longer stands in the position the move belongs to does not merely play
+     * a wrong move, it leaves the board carrying a hash that does not describe it.
+     *
+     * @param board The game board as it stands now.
+     * @return True if the position changed and the search result must be discarded.
+     */
+    private boolean positionHasMovedOn(final Board board) {
+      return board != this.gameBoard
+          || board.getPlyCount() != this.plyCountAtStart
+          || board.getZobristHash() != this.zobristHashAtStart;
+    }
+
+    /**
      * Handles the completion of the AI move calculation.
      * Updates the game state with the calculated move and refreshes the UI.
      */
@@ -524,6 +551,19 @@ public final class Table extends Observable {
       try {
         final Move bestMove = get();
         final Board board = Table.get().getGameBoard();
+
+        assert this.searchBoard.getZobristHash() == this.zobristHashAtStart :
+            "The search left its own board somewhere other than the position it was handed.";
+
+        if (positionHasMovedOn(board)) {
+          System.out.println("Discarding the computer's move: the position changed while it was thinking.");
+          return;
+        }
+        if (bestMove == getNullMove()) {
+          System.out.println("The search returned no move, so there is nothing to play.");
+          return;
+        }
+
         final String notation = bestMove.toNotation(board);
         Table.get().updateComputerMove(bestMove);
         board.makeMove(bestMove);
