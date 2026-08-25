@@ -231,6 +231,37 @@ public final class Board {
   }
 
   /**
+   * Returns how many times the current position has been reached along this board's make and
+   * unmake path, counting the present occurrence.
+   *
+   * @return The number of occurrences of the current position.
+   */
+  public int repetitionCount() {
+    return this.positionCounts.getOrDefault(this.zobristHash, 1);
+  }
+
+  /**
+   * Returns whether the current position has occurred three or more times along this board's make
+   * and unmake path. The Zobrist hash covers the side to move, castling rights, and en passant
+   * availability, so hash equality is the same test the rule itself specifies.
+   *
+   * @return True if the position has been repeated threefold.
+   */
+  public boolean isThreefoldRepetition() {
+    return repetitionCount() >= 3;
+  }
+
+  /**
+   * Returns whether one hundred plies, meaning fifty full moves, have passed with no pawn move
+   * and no capture.
+   *
+   * @return True if the fifty-move rule applies.
+   */
+  public boolean isFiftyMoveRule() {
+    return this.halfMoveClock >= 100;
+  }
+
+  /**
    * Retrieves the white player controlling the white pieces.
    *
    * @return The white player.

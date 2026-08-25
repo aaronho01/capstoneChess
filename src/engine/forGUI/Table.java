@@ -486,19 +486,31 @@ public final class Table extends Observable {
     @Override
     public void update(final Observable o,
                        final Object arg) {
-      final Player currentPlayer = Table.get().getGameBoard().currentPlayer();
+      final Board board = Table.get().getGameBoard();
+      final Player currentPlayer = board.currentPlayer();
       final boolean isInCheckMate = currentPlayer.isInCheckMate();
       final boolean isInStaleMate = currentPlayer.isInStaleMate();
+      final boolean isThreefold = board.isThreefoldRepetition();
+      final boolean isFiftyMove = board.isFiftyMoveRule();
+      final boolean isGameOver = isInCheckMate || isInStaleMate || isThreefold || isFiftyMove;
 
       if (isInCheckMate) {
         JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
-                "Game Over: Player " + currentPlayer + " is in checkmate!", "Game Over",
-                JOptionPane.INFORMATION_MESSAGE);
-      } if (isInStaleMate) {
+            "Game Over: Player " + currentPlayer + " is in checkmate!", "Game Over",
+            JOptionPane.INFORMATION_MESSAGE);
+      } else if (isInStaleMate) {
         JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
-                "Game Over: Player " + currentPlayer + " is in stalemate!", "Game Over",
-                JOptionPane.INFORMATION_MESSAGE);
-      } if (Table.get().getGameSetup().isAIPlayer(currentPlayer) && !isInCheckMate && !isInStaleMate) {
+            "Game Over: Player " + currentPlayer + " is in stalemate!", "Game Over",
+            JOptionPane.INFORMATION_MESSAGE);
+      } else if (isThreefold) {
+        JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
+            "Game Over: Draw by threefold repetition.", "Game Over",
+            JOptionPane.INFORMATION_MESSAGE);
+      } else if (isFiftyMove) {
+        JOptionPane.showMessageDialog(Table.get().getBoardPanel(),
+            "Game Over: Draw by the fifty-move rule.", "Game Over",
+            JOptionPane.INFORMATION_MESSAGE);
+      } if (Table.get().getGameSetup().isAIPlayer(currentPlayer) && !isGameOver) {
         System.out.println(currentPlayer + " is thinking....");
         final AIThinkTank thinkTank = new AIThinkTank();
         Table.get().setActiveSearch(thinkTank);
@@ -838,7 +850,8 @@ public final class Table extends Observable {
         @Override
         public void mouseClicked(final MouseEvent event) {
           if (Table.get().getGameSetup().isAIPlayer(Table.get().getGameBoard().currentPlayer()) ||
-                  BoardUtils.isEndOfGame(Table.get().getGameBoard())) {
+              BoardUtils.isEndOfGame(Table.get().getGameBoard()) ||
+              BoardUtils.isDrawnPosition(Table.get().getGameBoard())) {
             return;
           } if (isRightMouseButton(event)) {
             sourceTile = null;
