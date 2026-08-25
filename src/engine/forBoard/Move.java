@@ -82,32 +82,58 @@ public abstract class Move {
   protected abstract Move reset();
 
   /**
-   * Calculates the hash code of the move.
-   * This implementation safely handles null movedPiece references.
+   * Returns the piece a pawn is promoted to by this move, or null if this move is not a promotion.
+   * Promotion is part of move identity, since four distinct legal moves can otherwise share the
+   * same pair of squares.
    *
-   * @return The calculated hash code.
+   * @return The promotion piece, or null if this move is not a promotion.
    */
-  @Override
-  public int hashCode() {
-    final int currentPosition = (movedPiece != null) ? movedPiece.getPiecePosition() : -1;
-    return Objects.hash(destinationCoordinate, movedPiece, currentPosition, isFirstMove);
+  public Piece getPromotionPiece() {
+    return null;
   }
 
   /**
-   * Compares this move to another object to determine if they are equal.
-   * Moves are considered equal if they have the same current coordinate,
-   * destination coordinate, and moved piece.
+   * Compares this move to another for equality. Two moves are equal when they leave the same
+   * square, arrive at the same square, and promote to the same piece type, which is exactly what
+   * identifies a move within a position. The moved piece, the captured piece, the castling rook,
+   * and the originating board are deliberately excluded. They are all recoverable from the
+   * position, and including the moved piece made the same logical move compare unequal across two
+   * positions, because Piece equality covers the piece's move count and first move flag. That is
+   * precisely the comparison killer move and countermove matching depends on.
+   * <p>
+   * This method is final. Per subclass overrides are what made equality asymmetric, with a plain
+   * pawn move reporting equal to the promotion decorating it but not the reverse.
    *
    * @param other The other object to compare to.
    * @return True if the moves are equal, false otherwise.
    */
   @Override
-  public boolean equals(Object other) {
+  public final boolean equals(final Object other) {
     if (this == other) return true;
     if (!(other instanceof Move otherMove)) return false;
     return getCurrentCoordinate() == otherMove.getCurrentCoordinate() &&
-            getDestinationCoordinate() == otherMove.getDestinationCoordinate() &&
-            Objects.equals(movedPiece, otherMove.getMovedPiece());
+        getDestinationCoordinate() == otherMove.getDestinationCoordinate() &&
+        promotionType() == otherMove.promotionType();
+  }
+
+  /**
+   * Calculates the hash code of the move from the same three values that define equality.
+   *
+   * @return The calculated hash code.
+   */
+  @Override
+  public final int hashCode() {
+    return Objects.hash(getCurrentCoordinate(), getDestinationCoordinate(), promotionType());
+  }
+
+  /**
+   * Returns the type of the promotion piece, or null when this move is not a promotion.
+   *
+   * @return The promotion piece type, or null.
+   */
+  private Piece.PieceType promotionType() {
+    final Piece promotion = getPromotionPiece();
+    return promotion != null ? promotion.getPieceType() : null;
   }
 
   /**
@@ -391,29 +417,6 @@ public abstract class Move {
     }
 
     /**
-     * Calculates a hash code for the AttackMove by combining the hash codes of the moving piece and the attacked piece.
-     *
-     * @return The hash code for this AttackMove.
-     */
-    @Override
-    public int hashCode() {
-      return Objects.hash(super.hashCode(), attackedPiece);
-    }
-
-    /**
-     * Checks if two AttackMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this AttackMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      if (this == other) return true;
-      if (!(other instanceof AttackMove otherAttackMove)) return false;
-      return super.equals(otherAttackMove) && getAttackedPiece().equals(otherAttackMove.getAttackedPiece());
-    }
-
-    /**
      * Gets the piece attacked as a result of this move.
      *
      * @return The attacked piece.
@@ -506,16 +509,6 @@ public abstract class Move {
     }
 
     /**
-     * Provides a safe implementation of hashCode for NullMove that doesn't rely on movedPiece.
-     *
-     * @return A constant hash code for NullMove.
-     */
-    @Override
-    public int hashCode() {
-      return 0;
-    }
-
-    /**
      * Gets the current coordinate, which is set to -1 for a null move.
      *
      * @return The current coordinate, which is -1.
@@ -603,17 +596,6 @@ public abstract class Move {
     }
 
     /**
-     * Checks if two MajorMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this MajorMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      return this == other || other instanceof MajorMove && super.equals(other);
-    }
-
-    /**
      * Generates a string representation of the major move.
      *
      * @return The string representing the move, e.g., "Qd4" for a queen move to d4.
@@ -686,17 +668,6 @@ public abstract class Move {
     }
 
     /**
-     * Checks if two MajorAttackMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this MajorAttackMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      return this == other || other instanceof MajorAttackMove && super.equals(other);
-    }
-
-    /**
      * Generates a string representation of the major attack move.
      *
      * @return The string representing the move, e.g., "Qxd4" for a queen capturing a piece on d4.
@@ -765,17 +736,6 @@ public abstract class Move {
     }
 
     /**
-     * Checks if two PawnMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this PawnMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      return this == other || other instanceof PawnMove && super.equals(other);
-    }
-
-    /**
      * Generates a string representation of the pawn move.
      *
      * @return The string representing the move, e.g., "e4" for a pawn moving to e4.
@@ -834,17 +794,6 @@ public abstract class Move {
     }
 
     /**
-     * Checks if two PawnAttackMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this PawnAttackMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      return this == other || other instanceof PawnAttackMove && super.equals(other);
-    }
-
-    /**
      * Generates a string representation of the pawn attack move.
      *
      * @return The string representing the move, e.g., "exd4" for a pawn capturing a piece on d4.
@@ -898,17 +847,6 @@ public abstract class Move {
       this.destinationCoordinate = destinationCoordinate;
       this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
       return this;
-    }
-
-    /**
-     * Checks if two PawnJump instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this PawnJump.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      return this == other || other instanceof PawnJump && super.equals(other);
     }
 
     /**
@@ -988,17 +926,6 @@ public abstract class Move {
       this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
       this.attackedPiece = pieceAttacked;
       return this;
-    }
-
-    /**
-     * Checks if two PawnEnPassantAttack instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this PawnEnPassantAttack.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      return this == other || other instanceof PawnEnPassantAttack && super.equals(other);
     }
 
     /**
@@ -1086,33 +1013,6 @@ public abstract class Move {
     }
 
     /**
-     * Checks if two PawnPromotion instances are equal by comparing their attributes.
-     *
-     * @param o The object to compare with this PawnPromotion.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(Object o) {
-      if (this == o) return true;
-      if (o == null || getClass() != o.getClass()) return false;
-      if (!super.equals(o)) return false;
-      PawnPromotion that = (PawnPromotion) o;
-      return Objects.equals(decoratedMove, that.decoratedMove) &&
-              Objects.equals(promotedPawn, that.promotedPawn) &&
-              Objects.equals(promotionPiece, that.promotionPiece);
-    }
-
-    /**
-     * Generates a hash code for this PawnPromotion instance based on its attributes.
-     *
-     * @return The computed hash code.
-     */
-    @Override
-    public int hashCode() {
-      return Objects.hash(super.hashCode(), decoratedMove, promotedPawn, promotionPiece);
-    }
-
-    /**
      * Updates the Zobrist hash for this pawn promotion move.
      *
      * @param currentHash The current board hash.
@@ -1190,6 +1090,16 @@ public abstract class Move {
     public String toString() {
       return BoardUtils.getPositionAtCoordinate(this.movedPiece.getPiecePosition()) + "-" +
               BoardUtils.getPositionAtCoordinate(this.destinationCoordinate) + "=" + this.promotionPiece.getPieceType();
+    }
+
+    /**
+     * Returns the piece this pawn promotes to.
+     *
+     * @return The promotion piece.
+     */
+    @Override
+    public Piece getPromotionPiece() {
+      return this.promotionPiece;
     }
   }
 
@@ -1343,29 +1253,6 @@ public abstract class Move {
       board.setHalfMoveClock(undo.priorHalfMoveClock());
       board.setTransitionMove(undo.priorTransitionMove());
     }
-
-    /**
-     * Calculates a hash code for the castling move, combining the base hash code with the rook.
-     *
-     * @return The hash code for the castling move.
-     */
-    @Override
-    public int hashCode() {
-      return Objects.hash(super.hashCode(), castleRook);
-    }
-
-    /**
-     * Checks if two CastleMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this CastleMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      if (this == other) return true;
-      if (!(other instanceof CastleMove otherCastleMove)) return false;
-      return super.equals(otherCastleMove) && this.castleRook.equals(otherCastleMove.getCastleRook());
-    }
   }
 
   /**
@@ -1426,19 +1313,6 @@ public abstract class Move {
       this.castleRookStart = castleRookStart;
       this.castleRookDestination = castleRookDestination;
       return this;
-    }
-
-    /**
-     * Checks if two KingSideCastleMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this KingSideCastleMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      if (this == other) return true;
-      if (!(other instanceof KingSideCastleMove otherKingSideCastleMove)) return false;
-      return super.equals(otherKingSideCastleMove) && this.castleRook.equals(otherKingSideCastleMove.getCastleRook());
     }
 
     /**
@@ -1510,19 +1384,6 @@ public abstract class Move {
       this.castleRookStart = castleRookStart;
       this.castleRookDestination = castleRookDestination;
       return this;
-    }
-
-    /**
-     * Checks if two QueenSideCastleMove instances are equal by comparing their attributes.
-     *
-     * @param other The object to compare with this QueenSideCastleMove.
-     * @return True if the objects are equal, false otherwise.
-     */
-    @Override
-    public boolean equals(final Object other) {
-      if (this == other) return true;
-      if (!(other instanceof QueenSideCastleMove otherQueenSideCastleMove)) return false;
-      return super.equals(otherQueenSideCastleMove) && this.castleRook.equals(otherQueenSideCastleMove.getCastleRook());
     }
 
     /**
