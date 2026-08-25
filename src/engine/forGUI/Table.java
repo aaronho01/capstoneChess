@@ -308,11 +308,8 @@ public final class Table extends Observable {
     }); optionsMenu.add(showBoardValueItem);
 
     final JMenuItem undoMoveMenuItem = new JMenuItem("Undo last move", KeyEvent.VK_M);
-    undoMoveMenuItem.addActionListener(e -> {
-      if (Table.get().getMoveLog().size() > 0) {
-        undoLastMove();
-      }
-    }); optionsMenu.add(undoMoveMenuItem);
+    undoMoveMenuItem.addActionListener(e -> undoLastMove());
+    optionsMenu.add(undoMoveMenuItem);
 
     final JMenuItem setupGameMenuItem = new JMenuItem("Setup Game", KeyEvent.VK_S);
     setupGameMenuItem.addActionListener(e -> {
@@ -438,16 +435,41 @@ public final class Table extends Observable {
   }
 
   /**
-   * Removes the last move from the move log and updates the game board state.
-   * Clears the computer move and refreshes UI components.
+   * Reverses play to the last position a human is to move from, or by one ply when both sides
+   * are engine-controlled. Unwinding a single ply against the engine would leave the engine to
+   * move, which the mouse listener refuses to accept input on.
    */
   private void undoLastMove() {
-    Table.get().getMoveLog().removeMove(Table.get().getMoveLog().size() - 1);
-    this.chessBoard.unmakeMove();
+    final MoveLog log = Table.get().getMoveLog();
+    if (log.size() == 0) {
+      return;
+    }
+    final GameSetup setup = Table.get().getGameSetup();
+    final boolean bothSidesAreAI = setup.isAIPlayer(this.chessBoard.whitePlayer()) &&
+            setup.isAIPlayer(this.chessBoard.blackPlayer());
+
+    undoOnePly();
+    while (!bothSidesAreAI && log.size() > 0 && setup.isAIPlayer(this.chessBoard.currentPlayer())) {
+      undoOnePly();
+    }
+
     this.computerMove = null;
+    this.sourceTile = null;
+    this.humanMovedPiece = null;
     Table.get().getGameHistoryPanel().redo(chessBoard, Table.get().getMoveLog());
     Table.get().getBoardPanel().drawBoard(chessBoard);
     Table.get().getDebugPanel().redo();
+    if (isSearchRunning()) {
+      this.restartEngineAfterSearch = true;
+    } else {
+      moveMadeUpdate(PlayerType.HUMAN);
+    }
+  }
+
+  /** Takes one ply off the game board and the move log together, keeping the two in step. */
+  private void undoOnePly() {
+    Table.get().getMoveLog().removeMove(Table.get().getMoveLog().size() - 1);
+    this.chessBoard.unmakeMove();
   }
 
   /**
