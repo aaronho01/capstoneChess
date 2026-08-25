@@ -848,15 +848,18 @@ public final class Table extends Observable {
               sourceTile = chessBoard.getPiece(tileId);
               humanMovedPiece = sourceTile;
             } else {
-              final Move move = createMove(chessBoard, sourceTile.getPiecePosition(), tileId);
-              if (move != getNullMove() &&
-                  move.getMovedPiece().getPieceAllegiance() == chessBoard.currentPlayer().getAlliance()) {
-                final String notation = move.toNotation(chessBoard);
-                chessBoard.makeMove(move);
-                if (chessBoard.currentPlayer().getOpponent().isInCheck()) {
-                  chessBoard.unmakeMove();
-                } else {
-                  moveLog.addMove(move, notation);
+              final Move candidate = createMove(chessBoard, sourceTile.getPiecePosition(), tileId);
+              if (candidate != getNullMove() &&
+                  candidate.getMovedPiece().getPieceAllegiance() == chessBoard.currentPlayer().getAlliance()) {
+                final Move move = resolvePromotion(candidate);
+                if (move != getNullMove()) {
+                  final String notation = move.toNotation(chessBoard);
+                  chessBoard.makeMove(move);
+                  if (chessBoard.currentPlayer().getOpponent().isInCheck()) {
+                    chessBoard.unmakeMove();
+                  } else {
+                    moveLog.addMove(move, notation);
+                  }
                 }
               } sourceTile = null;
               humanMovedPiece = null;
@@ -884,6 +887,50 @@ public final class Table extends Observable {
       validate();
     }
 
+    /**
+     * Asks the player which piece a promoting pawn should become.
+     *
+     * @return The chosen promotion piece type, or null if the player dismissed the dialog.
+     */
+    private Piece.PieceType promptForPromotionPiece() {
+      final String[] choices = { "Queen", "Rook", "Bishop", "Knight" };
+      final int chosen = JOptionPane.showOptionDialog(
+          Table.get().getBoardPanel(),
+          "Promote the pawn to:",
+          "Pawn Promotion",
+          JOptionPane.DEFAULT_OPTION,
+          JOptionPane.PLAIN_MESSAGE,
+          null,
+          choices,
+          choices[0]);
+      return switch (chosen) {
+        case 0 -> Piece.PieceType.QUEEN;
+        case 1 -> Piece.PieceType.ROOK;
+        case 2 -> Piece.PieceType.BISHOP;
+        case 3 -> Piece.PieceType.KNIGHT;
+        default -> null;
+      };
+    }
+
+    /**
+     * Resolves a candidate move into the move the player actually intends, asking which piece to
+     * promote to when the candidate is a promotion. Non promotions are returned untouched, and a
+     * dismissed dialog cancels the move rather than silently promoting to a queen.
+     *
+     * @param candidate The move matched from the squares the player clicked.
+     * @return The move to play, or the null move if the player cancelled.
+     */
+    private Move resolvePromotion(final Move candidate) {
+      if (candidate.getPromotionPiece() == null) {
+        return candidate;
+      }
+      final Piece.PieceType chosen = promptForPromotionPiece();
+      if (chosen == null) {
+        return getNullMove();
+      }
+      return createMove(chessBoard, candidate.getCurrentCoordinate(),
+          candidate.getDestinationCoordinate(), chosen);
+    }
     /**
      * Draws the appearance of the tile based on the current state of the chessboard.
      *

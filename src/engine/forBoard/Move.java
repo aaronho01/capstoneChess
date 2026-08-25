@@ -1423,23 +1423,48 @@ public abstract class Move {
     }
 
     /**
-     * Creates a move with the specified current and destination coordinates on the given board.
-     * This method searches through the legal moves on the board to find a matching move.
+     * Creates a move with the specified current and destination coordinates on the given board,
+     * promoting to a queen if the move turns out to be a promotion. This is the form to use where
+     * the promotion piece is not a choice, such as replaying a recorded move.
      *
      * @param board The current state of the chess board.
      * @param currentCoordinate The current coordinate of the moved piece.
      * @param destinationCoordinate The destination coordinate of the move.
-     * @return The created move, or a null move if no matching legal move is found.
+     * @return The matching legal move, or a null move if there is no such move.
      */
     public static Move createMove(final Board board,
                                   final int currentCoordinate,
                                   final int destinationCoordinate) {
-      for (final Move move: board.getAllLegalMoves()) {
-        if (move.getCurrentCoordinate() == currentCoordinate &&
-                move.getDestinationCoordinate() == destinationCoordinate) {
+      return createMove(board, currentCoordinate, destinationCoordinate, Piece.PieceType.QUEEN);
+    }
+
+    /**
+     * Creates a move with the specified current and destination coordinates on the given board,
+     * promoting to the requested piece type if the move is a promotion. Four legal moves can share
+     * a pair of squares when a pawn reaches the back rank, so the promotion type is what tells them
+     * apart. It is ignored for every other kind of move.
+     *
+     * @param board The current state of the chess board.
+     * @param currentCoordinate The current coordinate of the moved piece.
+     * @param destinationCoordinate The destination coordinate of the move.
+     * @param promotionType The piece type to promote to if this move is a promotion.
+     * @return The matching legal move, or a null move if there is no such move.
+     */
+    public static Move createMove(final Board board,
+                                  final int currentCoordinate,
+                                  final int destinationCoordinate,
+                                  final Piece.PieceType promotionType) {
+      for (final Move move : board.getAllLegalMoves()) {
+        if (move.getCurrentCoordinate() != currentCoordinate ||
+            move.getDestinationCoordinate() != destinationCoordinate) {
+          continue;
+        }
+        final Piece promotion = move.getPromotionPiece();
+        if (promotion == null || promotion.getPieceType() == promotionType) {
           return move;
         }
-      } return MoveUtils.NULL_MOVE;
+      }
+      return MoveUtils.NULL_MOVE;
     }
   }
 }
