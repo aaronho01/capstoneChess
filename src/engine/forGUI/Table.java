@@ -612,9 +612,13 @@ public final class Table extends Observable {
      */
     @Override
     protected Move doInBackground() {
-      final AlphaBeta strategy = new AlphaBeta(this.searchDepth, this.searchBoard);
+      final AlphaBeta strategy = new AlphaBeta(this.searchDepth);
       strategy.addObserver(this.debugPanel);
-      return strategy.execute(this.searchBoard);
+      try {
+        return strategy.execute(this.searchBoard);
+      } finally {
+        strategy.shutdown();
+      }
     }
 
     /**

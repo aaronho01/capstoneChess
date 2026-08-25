@@ -36,10 +36,10 @@ import static engine.forBoard.Move.MoveFactory;
  */
 public class AlphaBeta extends Observable implements MoveStrategy {
 
-  /** The evaluator used to assess board positions and generate evaluation scores. */
-  private final BoardEvaluator evaluator;
+  /** The evaluator used to assess board positions, selected at the start of each search. */
+  private volatile BoardEvaluator evaluator;
 
-  /** The maximum depth for iterative deepening search. */
+  /** The depth used by {@link #execute(Board)} when a caller supplies no depth of its own. */
   private final int maxDepth;
 
   /** The count of boards evaluated during the search process. */
@@ -296,35 +296,24 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Constructs an AlphaBeta chess engine with the specified maximum search depth and a
-   * transposition table of the default size.
+   * Constructs an AlphaBeta chess engine with the given default search depth and a transposition
+   * table of the default size.
    *
-   * @param maxDepth The maximum depth for iterative deepening search.
-   * @param board The initial board position for evaluator selection.
+   * @param maxDepth The depth used by {@link #execute(Board)} when no depth is supplied per search.
    */
-  public AlphaBeta(final int maxDepth, final Board board) {
-    this(maxDepth, board, DEFAULT_TABLE_SIZE_MB);
+  public AlphaBeta(final int maxDepth) {
+    this(maxDepth, DEFAULT_TABLE_SIZE_MB);
   }
 
   /**
-   * Constructs an AlphaBeta chess engine with the specified maximum search depth and transposition
-   * table size. Initializes the thread pool, transposition table, and determines the appropriate
-   * board evaluator based on the current game state.
-   * <p>
-   * The table size is a parameter because {@link #execute(Board)} shuts this engine's thread pool
-   * down when it returns, so an instance searches exactly one move and a caller that plays a whole
-   * game constructs one engine per move. Every construction allocates the entire table, which at
-   * the default size is several million entry objects discarded as soon as that move ends. A
-   * caller playing many games unattended pays that on every move of every game and would spend
-   * more time allocating than searching. Interactive play should keep the default, where a single
-   * allocation is hidden inside the time a person takes to move.
+   * Constructs an AlphaBeta chess engine with the given default search depth and transposition
+   * table size. The table is allocated once here and serves every search this engine runs.
    *
-   * @param maxDepth The maximum depth for iterative deepening search.
-   * @param board The initial board position for evaluator selection.
+   * @param maxDepth The depth used by {@link #execute(Board)} when no depth is supplied per search.
    * @param tableSizeMB The size of the transposition table in megabytes, at least one.
    * @throws IllegalArgumentException If the requested table size is less than one megabyte.
    */
-  public AlphaBeta(final int maxDepth, final Board board, final int tableSizeMB) {
+  public AlphaBeta(final int maxDepth, final int tableSizeMB) {
     if (tableSizeMB < 1) {
       throw new IllegalArgumentException(
               "The transposition table needs at least one megabyte, requested " + tableSizeMB);
@@ -333,7 +322,6 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     this.threadCount = Runtime.getRuntime().availableProcessors();
     this.searchThreadPool = Executors.newFixedThreadPool(threadCount);
     this.transpositionTable = new StripedTranspositionTable(tableSizeMB);
-    this.evaluator = determineGameState(board);
 
     for (int i = 0; i < 64; i++) {
       for (int j = 0; j < 64; j++) {
@@ -353,52 +341,72 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Executes the alpha-beta search algorithm with iterative deepening and parallel search
-   * to find the best move for the current player. Uses aspiration windows, transposition
-   * tables, and various pruning techniques to optimize search performance.
+   * Executes the alpha-beta search to this engine's default depth.
    *
    * @param board The current chess board position.
    * @return The best move determined by the search algorithm.
    */
   @Override
   public Move execute(final Board board) {
+    return execute(board, this.maxDepth);
+  }
+
+  /**
+   * Executes the alpha-beta search algorithm with iterative deepening and parallel search to find
+   * the best move for the current player, to the given depth.
+   * <p>
+   * The thread pool, transposition table, history heuristic, and countermove table survive this
+   * call and carry into the next search. A caller that is finished with this engine must call
+   * {@link #shutdown()}.
+   *
+   * @param board The current chess board position.
+   * @param searchDepth The maximum depth for iterative deepening on this search.
+   * @return The best move determined by the search algorithm.
+   */
+  public Move execute(final Board board, final int searchDepth) {
     final long startTime = System.currentTimeMillis();
     Move bestMove = MoveFactory.getNullMove();
 
     this.searchStopped = false;
     this.boardsEvaluated.set(0);
     this.transpositionTable.incrementAge();
+    this.evaluator = determineGameState(board);
 
     EvaluationCache.get().clear();
 
-    try {
-      for (int currentDepth = 1; currentDepth <= maxDepth && !searchStopped; currentDepth++) {
-        if (currentDepth >= 3) {
-          bestMove = searchRootAspirationWindow(board, currentDepth, bestMove);
-        } else {
-          bestMove = searchRootParallel(board, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
-        }
-
-        updateHistoryHeuristic(bestMove, currentDepth);
-
-        final long evaluatedPositions = this.boardsEvaluated.get();
-        final long executionTime = System.currentTimeMillis() - startTime;
-        final String result = String.format(
-                "%s | depth = %d | boards evaluated = %d | time = %.2f sec | nps = %.2f M | %s",
-                bestMove, currentDepth, evaluatedPositions,
-                executionTime / 1000.0,
-                (evaluatedPositions / (executionTime / 1000.0)) / 1_000_000.0,
-                EvaluationCache.get().getStats());
-
-        System.out.println(result);
-        setChanged();
-        notifyObservers(result);
+    for (int currentDepth = 1; currentDepth <= searchDepth && !searchStopped; currentDepth++) {
+      if (currentDepth >= 3) {
+        bestMove = searchRootAspirationWindow(board, currentDepth, bestMove);
+      } else {
+        bestMove = searchRootParallel(board, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
       }
-    } finally {
-      searchThreadPool.shutdown();
+
+      updateHistoryHeuristic(bestMove, currentDepth);
+
+      final long evaluatedPositions = this.boardsEvaluated.get();
+      final long executionTime = System.currentTimeMillis() - startTime;
+      final String result = String.format(
+              "%s | depth = %d | boards evaluated = %d | time = %.2f sec | nps = %.2f | %s",
+              bestMove, currentDepth, evaluatedPositions,
+              executionTime / 1000.0,
+              evaluatedPositions / (executionTime / 1000.0),
+              EvaluationCache.get().getStats());
+
+      System.out.println(result);
+      setChanged();
+      notifyObservers(result);
     }
 
     return bestMove;
+  }
+
+  /**
+   * Raises the stop flag and shuts this engine's search thread pool down. The engine cannot
+   * search after this returns.
+   */
+  public void shutdown() {
+    this.searchStopped = true;
+    this.searchThreadPool.shutdown();
   }
 
   /**
