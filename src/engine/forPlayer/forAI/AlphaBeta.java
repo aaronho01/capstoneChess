@@ -60,8 +60,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** Thread-safe transposition table for storing previously evaluated positions. */
   private final StripedTranspositionTable transpositionTable;
 
-  /** History heuristic table for move ordering based on previous search results. */
-  private static final int[][] historyHeuristic = new int[64][64];
+  /** History heuristic table for move ordering, indexed by origin and destination square. */
+  private final int[][] historyHeuristic = new int[64][64];
 
   /** Killer moves table storing good non-capture moves for each search ply. */
   private final ThreadLocal<Move[][]> killerMoves = ThreadLocal.withInitial(() ->
@@ -76,6 +76,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
   /** Maximum search depth supported by data structures. */
   private static final int MAX_SEARCH_DEPTH = 100;
+
+  /** The transposition table size in megabytes used when a caller does not specify one. */
+  private static final int DEFAULT_TABLE_SIZE_MB = 256;
 
   /** The depth threshold for applying futility pruning. */
   private static final int FUTILITY_PRUNING_DEPTH = 3;
@@ -196,11 +199,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           int score2 = 0;
 
           if (isValidPosition(move1)) {
-            score1 = historyHeuristic[move1.getCurrentCoordinate()][move1.getDestinationCoordinate()];
-          }
-
-          if (isValidPosition(move2)) {
-            score2 = historyHeuristic[move2.getCurrentCoordinate()][move2.getDestinationCoordinate()];
+            score1 = engine.historyHeuristic[move1.getCurrentCoordinate()][move1.getDestinationCoordinate()];
+          } if (isValidPosition(move2)) {
+            score2 = engine.historyHeuristic[move2.getCurrentCoordinate()][move2.getDestinationCoordinate()];
           }
 
           return Integer.compare(score2, score1);
@@ -259,10 +260,10 @@ public class AlphaBeta extends Observable implements MoveStrategy {
                         move2.isAttack() ? seeScores.getOrDefault(move2, 0) : -1000
                 )
                 .compare(
-                        isValidPosition(move1) ?
-                                historyHeuristic[move1.getCurrentCoordinate()][move1.getDestinationCoordinate()] : 0,
-                        isValidPosition(move2) ?
-                                historyHeuristic[move2.getCurrentCoordinate()][move2.getDestinationCoordinate()] : 0
+                    isValidPosition(move1) ?
+                        engine.historyHeuristic[move1.getCurrentCoordinate()][move1.getDestinationCoordinate()] : 0,
+                   isValidPosition(move2) ?
+                        engine.historyHeuristic[move2.getCurrentCoordinate()][move2.getDestinationCoordinate()] : 0
                 )
                 .result());
         return sortedMoves;
@@ -295,18 +296,43 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Constructs a AlphaBeta chess engine with the specified maximum search depth.
-   * Initializes the thread pool, transposition table, and determines the appropriate
-   * board evaluator based on the current game state.
+   * Constructs an AlphaBeta chess engine with the specified maximum search depth and a
+   * transposition table of the default size.
    *
    * @param maxDepth The maximum depth for iterative deepening search.
    * @param board The initial board position for evaluator selection.
    */
   public AlphaBeta(final int maxDepth, final Board board) {
+    this(maxDepth, board, DEFAULT_TABLE_SIZE_MB);
+  }
+
+  /**
+   * Constructs an AlphaBeta chess engine with the specified maximum search depth and transposition
+   * table size. Initializes the thread pool, transposition table, and determines the appropriate
+   * board evaluator based on the current game state.
+   * <p>
+   * The table size is a parameter because {@link #execute(Board)} shuts this engine's thread pool
+   * down when it returns, so an instance searches exactly one move and a caller that plays a whole
+   * game constructs one engine per move. Every construction allocates the entire table, which at
+   * the default size is several million entry objects discarded as soon as that move ends. A
+   * caller playing many games unattended pays that on every move of every game and would spend
+   * more time allocating than searching. Interactive play should keep the default, where a single
+   * allocation is hidden inside the time a person takes to move.
+   *
+   * @param maxDepth The maximum depth for iterative deepening search.
+   * @param board The initial board position for evaluator selection.
+   * @param tableSizeMB The size of the transposition table in megabytes, at least one.
+   * @throws IllegalArgumentException If the requested table size is less than one megabyte.
+   */
+  public AlphaBeta(final int maxDepth, final Board board, final int tableSizeMB) {
+    if (tableSizeMB < 1) {
+      throw new IllegalArgumentException(
+              "The transposition table needs at least one megabyte, requested " + tableSizeMB);
+    }
     this.maxDepth = maxDepth;
     this.threadCount = Runtime.getRuntime().availableProcessors();
     this.searchThreadPool = Executors.newFixedThreadPool(threadCount);
-    this.transpositionTable = new StripedTranspositionTable(256);
+    this.transpositionTable = new StripedTranspositionTable(tableSizeMB);
     this.evaluator = determineGameState(board);
 
     for (int i = 0; i < 64; i++) {
