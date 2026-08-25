@@ -4,6 +4,7 @@ import engine.forBoard.Board;
 import engine.forPiece.*;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The GameStateDetector class provides precise identification of the current chess game phase
@@ -19,7 +20,7 @@ public class GameStateDetector {
   private static final GameStateDetector INSTANCE = new GameStateDetector();
 
   /** Cache to avoid recalculating game state too frequently. */
-  private final Map<Long, GamePhase> gameStateCache = new HashMap<>();
+  private final Map<Long, GamePhase> gameStateCache = new ConcurrentHashMap<>();
 
   /** Maximum size for the game state cache to prevent excessive memory usage. */
   private static final int CACHE_MAX_SIZE = 10000;
@@ -79,8 +80,9 @@ public class GameStateDetector {
    */
   public GamePhase detectGamePhase(final Board board) {
     long boardHash = board.getZobristHash();
-    if (gameStateCache.containsKey(boardHash)) {
-      return gameStateCache.get(boardHash);
+    GamePhase cached = gameStateCache.get(boardHash);
+    if (cached != null) {
+      return cached;
     }
 
     int materialScore = calculateMaterialScore(board);
