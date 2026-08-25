@@ -87,6 +87,12 @@ public final class Table extends Observable {
    */
   private boolean restartEngineAfterSearch;
 
+  /**
+   * The engine that plays the computer's moves, created on the first search and reused for the
+   * rest of the session. Only ever read or written on the event dispatch thread.
+   */
+  private AlphaBeta engine;
+
   /** The color of light tiles on the chess board. */
   private final Color lightTileColor = Color.decode("#FFFACD");
 
@@ -200,6 +206,20 @@ public final class Table extends Observable {
    */
   private DebugPanel getDebugPanel() {
     return this.debugPanel;
+  }
+
+  /**
+   * Returns the engine, creating it and registering the debug panel as its observer on first
+   * use. Must be called on the event dispatch thread.
+   *
+   * @return The engine that plays the computer's moves.
+   */
+  private AlphaBeta getEngine() {
+    if (this.engine == null) {
+      this.engine = new AlphaBeta(this.gameSetup.getSearchDepth());
+      this.engine.addObserver(this.debugPanel);
+    }
+    return this.engine;
   }
 
   /**
@@ -571,6 +591,9 @@ public final class Table extends Observable {
     /** The search depth, read from the game setup dialog when this worker is constructed. */
     private final int searchDepth;
 
+    /** The engine this search runs on, shared with every other search in the session. */
+    private final AlphaBeta engine;
+
     /** The panel the search reports its per-depth progress to. */
     private final DebugPanel debugPanel;
 
@@ -600,6 +623,7 @@ public final class Table extends Observable {
       this.searchBoard = this.gameBoard.copy();
       this.searchDepth = Table.get().getGameSetup().getSearchDepth();
       this.debugPanel = Table.get().getDebugPanel();
+      this.engine = Table.get().getEngine();
     }
 
     /**
@@ -612,13 +636,7 @@ public final class Table extends Observable {
      */
     @Override
     protected Move doInBackground() {
-      final AlphaBeta strategy = new AlphaBeta(this.searchDepth);
-      strategy.addObserver(this.debugPanel);
-      try {
-        return strategy.execute(this.searchBoard);
-      } finally {
-        strategy.shutdown();
-      }
+      return this.engine.execute(this.searchBoard, this.searchDepth);
     }
 
     /**

@@ -104,10 +104,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The static exchange evaluation threshold for pruning bad captures. */
   private static final int SEE_PRUNING_THRESHOLD = -20;
 
-  /** The highest evaluation value seen during aspiration search. */
+  /** The highest evaluation value seen during aspiration search.
+   * Reset at the start of each search. */
   private double highestSeenValue = Double.NEGATIVE_INFINITY;
 
-  /** The lowest evaluation value seen during aspiration search. */
+  /** The lowest evaluation value seen during aspiration search.
+   * Reset at the start of each search. */
   private double lowestSeenValue = Double.POSITIVE_INFINITY;
 
   /** Reference to the static exchange evaluator for move evaluation. */
@@ -371,6 +373,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     this.boardsEvaluated.set(0);
     this.transpositionTable.incrementAge();
     this.evaluator = determineGameState(board);
+    this.highestSeenValue = Double.NEGATIVE_INFINITY;
+    this.lowestSeenValue = Double.POSITIVE_INFINITY;
 
     EvaluationCache.get().clear();
 
