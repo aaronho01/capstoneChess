@@ -17,8 +17,9 @@ import java.util.Map;
  * The FenParser class converts Forsyth-Edwards Notation strings into Board instances.
  * It exists so that arbitrary test positions can be loaded without playing a game up to them,
  * which is a prerequisite for move generation testing against published node counts.
- * The parser reads the piece placement, side to move, castling rights, and en passant fields,
- * and ignores the halfmove clock and fullmove number because the engine does not track them.
+ * The parser reads the piece placement, side to move, castling rights, en passant, halfmove
+ * clock, and fullmove number fields. The two counter fields are optional, since a position may
+ * be given without them, and default to a freshly started game when absent.
  * <p>
  * Castling rights and pawn double-step rights are expressed in this engine through the first
  * move status of the pieces involved rather than through a dedicated rights field, so the parser
@@ -55,6 +56,36 @@ public class FenParser {
   /** The board coordinate of the square on which the black queen side rook begins the game (a8). */
   private static final int BLACK_QUEEN_SIDE_ROOK_TILE = 0;
 
+  /** The index of the halfmove clock field within a Forsyth-Edwards Notation string. */
+  private static final int HALF_MOVE_CLOCK_FIELD = 4;
+
+  /** The index of the fullmove number field within a Forsyth-Edwards Notation string. */
+  private static final int FULL_MOVE_NUMBER_FIELD = 5;
+
+  /** The number of plies in one full move, used to convert a fullmove number into a ply count. */
+  private static final int PLIES_PER_FULL_MOVE = 2;
+
+  /** The board coordinate of the first square of the white back rank (a1). */
+  private static final int WHITE_BACK_RANK_ORIGIN = 56;
+
+  /** The board coordinate of the first square of the black back rank (a8). */
+  private static final int BLACK_BACK_RANK_ORIGIN = 0;
+
+  /** The file on which each side's queen side knight begins the game (b). */
+  private static final int QUEEN_SIDE_KNIGHT_FILE = 1;
+
+  /** The file on which each side's king side knight begins the game (g). */
+  private static final int KING_SIDE_KNIGHT_FILE = 6;
+
+  /** The file on which each side's queen side bishop begins the game (c). */
+  private static final int QUEEN_SIDE_BISHOP_FILE = 2;
+
+  /** The file on which each side's king side bishop begins the game (f). */
+  private static final int KING_SIDE_BISHOP_FILE = 5;
+
+  /** The file on which each side's queen begins the game (d). */
+  private static final int QUEEN_FILE = 3;
+
   /**
    * Private constructor to prevent instantiation of this utility class.
    *
@@ -65,9 +96,9 @@ public class FenParser {
   }
 
   /**
-   * Parses a Forsyth-Edwards Notation string and builds the board it describes.
-   * The halfmove clock and fullmove number fields are optional and are ignored when present,
-   * since the engine does not maintain either counter.
+   * The halfmove clock and fullmove number fields are optional. When present, the halfmove clock
+   * is carried into the board for the fifty-move rule and the fullmove number is converted into
+   * a ply count. When absent, both default to zero.
    *
    * @param fen The Forsyth-Edwards Notation string to parse.
    * @return The board described by the given notation string.
@@ -87,7 +118,13 @@ public class FenParser {
       builder.setEnPassantPawn(resolveEnPassantPawn(fields[3], nextMoveMaker, placedPawns));
     }
     builder.setMoveMaker(nextMoveMaker);
-    return builder.build();
+    if (fields.length > HALF_MOVE_CLOCK_FIELD) {
+      builder.setHalfMoveClock(parseCounter(fields[HALF_MOVE_CLOCK_FIELD], 0, "halfmove clock"));
+    } if (fields.length > FULL_MOVE_NUMBER_FIELD) {
+      final int fullMoveNumber = parseCounter(fields[FULL_MOVE_NUMBER_FIELD], 1, "fullmove number");
+      builder.setPlyCount(((fullMoveNumber - 1) * PLIES_PER_FULL_MOVE) +
+              (nextMoveMaker.isWhite() ? 0 : 1));
+    } return builder.build();
   }
 
   /**
@@ -156,20 +193,23 @@ public class FenParser {
         final Pawn pawn = new Pawn(alliance, coordinate, isUnmoved, isUnmoved ? 0 : 1);
         placedPawns.put(coordinate, pawn);
         builder.setPiece(pawn);
-      }
-      case 'n' -> builder.setPiece(new Knight(alliance, coordinate, 0));
-      case 'b' -> builder.setPiece(new Bishop(alliance, coordinate, 0));
-      case 'r' -> {
+      } case 'n' -> {
+        final boolean isUnmoved = isOnHomeSquare(alliance, coordinate, 'n');
+        builder.setPiece(new Knight(alliance, coordinate, isUnmoved, isUnmoved ? 0 : 1));
+      } case 'b' -> {
+        final boolean isUnmoved = isOnHomeSquare(alliance, coordinate, 'b');
+        builder.setPiece(new Bishop(alliance, coordinate, isUnmoved, isUnmoved ? 0 : 1));
+      } case 'r' -> {
         final boolean retainsRight = retainsRookCastlingRight(alliance, coordinate, castlingRights);
         builder.setPiece(new Rook(alliance, coordinate, retainsRight, retainsRight ? 0 : 1));
-      }
-      case 'q' -> builder.setPiece(new Queen(alliance, coordinate, 0));
-      case 'k' -> {
+      } case 'q' -> {
+        final boolean isUnmoved = isOnHomeSquare(alliance, coordinate, 'q');
+        builder.setPiece(new Queen(alliance, coordinate, isUnmoved, isUnmoved ? 0 : 1));
+      } case 'k' -> {
         final boolean kingSide = castlingRights.indexOf(alliance.isWhite() ? 'K' : 'k') >= 0;
         final boolean queenSide = castlingRights.indexOf(alliance.isWhite() ? 'Q' : 'q') >= 0;
         builder.setPiece(new King(alliance, coordinate, kingSide || queenSide, false, kingSide, queenSide));
-      }
-      default -> throw new IllegalArgumentException("Unrecognised piece symbol in FEN: " + symbol);
+      } default -> throw new IllegalArgumentException("Unrecognised piece symbol in FEN: " + symbol);
     }
   }
 
@@ -186,6 +226,29 @@ public class FenParser {
   private static boolean isOnPawnHomeRank(final Alliance alliance, final int coordinate) {
     return alliance.isWhite() ? BoardUtils.SeventhRow.get(coordinate)
             : BoardUtils.Instance.SecondRow.get(coordinate);
+  }
+
+  /**
+   * Determines whether a knight, bishop, or queen of the given alliance stands on a square it
+   * begins the game on. Forsyth-Edwards Notation does not record whether these pieces have moved,
+   * so their first move status is inferred from the square they occupy.
+   *
+   * @param alliance The alliance of the piece being placed.
+   * @param coordinate The board coordinate the piece occupies.
+   * @param symbol The lowercase placement symbol describing the piece.
+   * @return True if the piece stands on one of its starting squares, false otherwise.
+   */
+  private static boolean isOnHomeSquare(final Alliance alliance, final int coordinate, final char symbol) {
+    final int file = coordinate - (alliance.isWhite() ? WHITE_BACK_RANK_ORIGIN : BLACK_BACK_RANK_ORIGIN);
+    if (file < 0 || file >= NUM_FILES) {
+      return false;
+    }
+    return switch (symbol) {
+      case 'n' -> file == QUEEN_SIDE_KNIGHT_FILE || file == KING_SIDE_KNIGHT_FILE;
+      case 'b' -> file == QUEEN_SIDE_BISHOP_FILE || file == KING_SIDE_BISHOP_FILE;
+      case 'q' -> file == QUEEN_FILE;
+      default -> false;
+    };
   }
 
   /**
@@ -251,5 +314,28 @@ public class FenParser {
       case "b" -> Alliance.BLACK;
       default -> throw new IllegalArgumentException("Unrecognised side to move in FEN: " + field);
     };
+  }
+
+  /**
+   * Parses one of the two trailing counter fields of a Forsyth-Edwards Notation string.
+   *
+   * @param field The field to parse.
+   * @param minimum The smallest value the field is permitted to hold.
+   * @param fieldName The name of the field, used in the error message.
+   * @return The value the field holds.
+   * @throws IllegalArgumentException If the field is not a whole number or falls below the minimum.
+   */
+  private static int parseCounter(final String field, final int minimum, final String fieldName) {
+    final int value;
+    try {
+      value = Integer.parseInt(field);
+    } catch (final NumberFormatException exception) {
+      throw new IllegalArgumentException("Unrecognised " + fieldName + " in FEN: " + field);
+    }
+    if (value < minimum) {
+      throw new IllegalArgumentException("A FEN " + fieldName + " may not fall below " + minimum +
+              ", found " + value);
+    }
+    return value;
   }
 }
