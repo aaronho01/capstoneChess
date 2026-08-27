@@ -5,6 +5,7 @@ import engine.forBoard.*;
 import engine.forPiece.Piece;
 import engine.forPlayer.Player;
 import engine.forPlayer.forAI.AlphaBeta;
+import engine.forTesting.FenParser;
 import org.apache.commons.io.output.ByteArrayOutputStream;
 
 import javax.imageio.ImageIO;
@@ -331,6 +332,10 @@ public final class Table extends Observable {
     undoMoveMenuItem.addActionListener(e -> undoLastMove());
     optionsMenu.add(undoMoveMenuItem);
 
+    final JMenuItem loadFenMenuItem = new JMenuItem("Load FEN", KeyEvent.VK_F);
+    loadFenMenuItem.addActionListener(e -> loadPosition());
+    optionsMenu.add(loadFenMenuItem);
+
     final JMenuItem setupGameMenuItem = new JMenuItem("Setup Game", KeyEvent.VK_S);
     setupGameMenuItem.addActionListener(e -> {
       Table.get().getGameSetup().promptUser();
@@ -462,6 +467,30 @@ public final class Table extends Observable {
     } else {
       moveMadeUpdate(PlayerType.HUMAN);
     }
+  }
+
+  /**
+   * Prompts for a Forsyth-Edwards Notation string and replaces the game board with the position
+   * it describes, discarding the move history since no moves have been played to reach it.
+   * A malformed string is reported and leaves the current position untouched.
+   */
+  private void loadPosition() {
+    final String fen = JOptionPane.showInputDialog(null, "Enter a FEN string:",
+            "Load FEN", JOptionPane.PLAIN_MESSAGE);
+    if (fen == null || fen.isBlank()) {
+      return;
+    }
+    final Board loaded;
+    try {
+      loaded = FenParser.parse(fen);
+    } catch (final IllegalArgumentException exception) {
+      JOptionPane.showMessageDialog(null, exception.getMessage(), "Invalid FEN",
+              JOptionPane.ERROR_MESSAGE);
+      return;
+    }
+    updateGameBoard(loaded);
+    Table.get().getMoveLog().clear();
+    refreshAfterPositionChange();
   }
 
   /**
