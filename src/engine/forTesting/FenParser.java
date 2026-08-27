@@ -86,6 +86,12 @@ public class FenParser {
   /** The file on which each side's queen begins the game (d). */
   private static final int QUEEN_FILE = 3;
 
+  /** The file on which each side's king stands after castling king side (g). */
+  private static final int KING_SIDE_CASTLED_KING_FILE = 6;
+
+  /** The file on which each side's king stands after castling queen side (c). */
+  private static final int QUEEN_SIDE_CASTLED_KING_FILE = 2;
+
   /**
    * Private constructor to prevent instantiation of this utility class.
    *
@@ -205,10 +211,12 @@ public class FenParser {
       } case 'q' -> {
         final boolean isUnmoved = isOnHomeSquare(alliance, coordinate, 'q');
         builder.setPiece(new Queen(alliance, coordinate, isUnmoved, isUnmoved ? 0 : 1));
-      } case 'k' -> {
+      }       case 'k' -> {
         final boolean kingSide = castlingRights.indexOf(alliance.isWhite() ? 'K' : 'k') >= 0;
         final boolean queenSide = castlingRights.indexOf(alliance.isWhite() ? 'Q' : 'q') >= 0;
-        builder.setPiece(new King(alliance, coordinate, kingSide || queenSide, false, kingSide, queenSide));
+        final boolean retainsRight = kingSide || queenSide;
+        builder.setPiece(new King(alliance, coordinate, retainsRight,
+                !retainsRight && isOnCastledSquare(alliance, coordinate), kingSide, queenSide));
       } default -> throw new IllegalArgumentException("Unrecognised piece symbol in FEN: " + symbol);
     }
   }
@@ -249,6 +257,22 @@ public class FenParser {
       case 'q' -> file == QUEEN_FILE;
       default -> false;
     };
+  }
+
+  /**
+   * Determines whether a king of the given alliance stands on a square that a castling move would
+   * have placed it on. Forsyth-Edwards Notation does not record whether a king has castled, so a
+   * king that has forfeited both castling rights and stands on such a square is taken to have
+   * castled. Only a king on its own home rank can satisfy this, since the file arithmetic falls
+   * outside the range of a rank for any other coordinate.
+   *
+   * @param alliance The alliance of the king being placed.
+   * @param coordinate The board coordinate the king occupies.
+   * @return True if the king stands on a castled king square, false otherwise.
+   */
+  private static boolean isOnCastledSquare(final Alliance alliance, final int coordinate) {
+    final int file = coordinate - (alliance.isWhite() ? WHITE_BACK_RANK_ORIGIN : BLACK_BACK_RANK_ORIGIN);
+    return file == KING_SIDE_CASTLED_KING_FILE || file == QUEEN_SIDE_CASTLED_KING_FILE;
   }
 
   /**
