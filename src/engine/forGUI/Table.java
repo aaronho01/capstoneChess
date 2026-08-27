@@ -440,10 +440,20 @@ public final class Table extends Observable {
    */
   private void undoAllMoves() {
     updateGameBoard(Board.createStandardBoard());
+    Table.get().getMoveLog().clear();
+    refreshAfterPositionChange();
+  }
+
+  /**
+   * Brings the interface back into agreement with the game board after the position has been
+   * replaced or unwound. Clears any selection and computer move highlight left over from the
+   * previous position, redraws every panel, and hands the new position to the engine, deferring
+   * that last step when a search is still running on the position being discarded.
+   */
+  private void refreshAfterPositionChange() {
     this.computerMove = null;
     this.sourceTile = null;
     this.humanMovedPiece = null;
-    Table.get().getMoveLog().clear();
     Table.get().getGameHistoryPanel().redo(chessBoard, Table.get().getMoveLog());
     Table.get().getBoardPanel().drawBoard(chessBoard);
     Table.get().getDebugPanel().redo();
@@ -473,17 +483,7 @@ public final class Table extends Observable {
       undoOnePly();
     }
 
-    this.computerMove = null;
-    this.sourceTile = null;
-    this.humanMovedPiece = null;
-    Table.get().getGameHistoryPanel().redo(chessBoard, Table.get().getMoveLog());
-    Table.get().getBoardPanel().drawBoard(chessBoard);
-    Table.get().getDebugPanel().redo();
-    if (isSearchRunning()) {
-      this.restartEngineAfterSearch = true;
-    } else {
-      moveMadeUpdate(PlayerType.HUMAN);
-    }
+    refreshAfterPositionChange();
   }
 
   /** Takes one ply off the game board and the move log together, keeping the two in step. */
