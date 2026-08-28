@@ -134,7 +134,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         Move[][] killers = engine.killerMoves.get();
         Move lastMove = board.getTransitionMove();
 
+        // Every input the comparator reads is resolved once per move here. The history heuristic in
+        // particular is written by other search threads on a beta cutoff, so reading it inside the
+        // comparator lets the ordering change mid-sort and makes the sort throw.
         Map<Move, Integer> seeScores = new HashMap<>();
+        Map<Move, Integer> historyScores = new HashMap<>();
         Map<Move, Boolean> isUndefendedMap = new HashMap<>();
         Map<Move, Boolean> isKillerMap = new HashMap<>();
         Map<Move, Boolean> isCounterMap = new HashMap<>();
@@ -146,6 +150,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             isUndefendedMap.put(move, attackedPiece != null &&
                     !engine.seeEvaluator.isPieceDefended(attackedPiece, board));
           }
+
+          historyScores.put(move, isValidPosition(move) ?
+                  engine.historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] : 0);
 
           isKillerMap.put(move, move.equals(killers[0][ply]) || move.equals(killers[1][ply]));
 
@@ -197,16 +204,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             }
           }
 
-          int score1 = 0;
-          int score2 = 0;
-
-          if (isValidPosition(move1)) {
-            score1 = engine.historyHeuristic[move1.getCurrentCoordinate()][move1.getDestinationCoordinate()];
-          } if (isValidPosition(move2)) {
-            score2 = engine.historyHeuristic[move2.getCurrentCoordinate()][move2.getDestinationCoordinate()];
-          }
-
-          return Integer.compare(score2, score1);
+          return Integer.compare(historyScores.getOrDefault(move2, 0),
+                  historyScores.getOrDefault(move1, 0));
         });
         return sortedMoves;
       }
@@ -236,10 +235,13 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         List<Move> sortedMoves = new ArrayList<>(moves);
 
         Map<Move, Integer> seeScores = new HashMap<>();
+        Map<Move, Integer> historyScores = new HashMap<>();
         for (Move move : sortedMoves) {
           if (move.isAttack()) {
             seeScores.put(move, engine.seeEvaluator.evaluate(board, move));
           }
+          historyScores.put(move, isValidPosition(move) ?
+                  engine.historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] : 0);
         }
 
         // Whether a move gives check is resolved once per move here rather than inside the
@@ -261,12 +263,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
                         move1.isAttack() ? seeScores.getOrDefault(move1, 0) : -1000,
                         move2.isAttack() ? seeScores.getOrDefault(move2, 0) : -1000
                 )
-                .compare(
-                    isValidPosition(move1) ?
-                        engine.historyHeuristic[move1.getCurrentCoordinate()][move1.getDestinationCoordinate()] : 0,
-                   isValidPosition(move2) ?
-                        engine.historyHeuristic[move2.getCurrentCoordinate()][move2.getDestinationCoordinate()] : 0
-                )
+                .compare(historyScores.getOrDefault(move1, 0), historyScores.getOrDefault(move2, 0))
                 .result());
         return sortedMoves;
       }
@@ -469,21 +466,21 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private Move searchRootParallel(final Board board, final int depth, double alpha, double beta,
                                   final Move previousBestMove) {
     final List<Move> allMoves = new ArrayList<>(
-        MoveSorter.EXPENSIVE.sort(board.currentPlayer().getLegalMoves(), board, this, 0));
+            MoveSorter.EXPENSIVE.sort(board.currentPlayer().getLegalMoves(), board, this, 0));
 
     if (allMoves.isEmpty()) {
       return MoveFactory.getNullMove();
     }
 
     if (previousBestMove != null && previousBestMove != MoveFactory.getNullMove() &&
-        allMoves.contains(previousBestMove)) {
+            allMoves.contains(previousBestMove)) {
       allMoves.remove(previousBestMove);
       allMoves.add(0, previousBestMove);
     }
 
     final AtomicReference<Move> globalBestMove = new AtomicReference<>(allMoves.get(0));
     final AtomicReference<Double> globalBestScore = new AtomicReference<>(
-        board.currentPlayer().getAlliance().isWhite() ? alpha : beta);
+            board.currentPlayer().getAlliance().isWhite() ? alpha : beta);
 
     final AtomicInteger moveIndex = new AtomicInteger(0);
 
@@ -507,7 +504,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           if (id == 0) {
             try {
               searchMove(threadBoard, allMoves.get(0), depth,
-                  globalBestMove, globalBestScore, alpha, beta);
+                      globalBestMove, globalBestScore, alpha, beta);
             } finally {
               firstMoveLatch.countDown();
             }
@@ -523,14 +520,14 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             if (threadDepth < 1) threadDepth = 1;
 
             searchMove(threadBoard, allMoves.get(idx), threadDepth,
-                globalBestMove, globalBestScore, alpha, beta);
+                    globalBestMove, globalBestScore, alpha, beta);
           }
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
         } finally {
           boardsEvaluated.addAndGet(stats.boardsEvaluated);
           assert threadBoard.getZobristHash() == rootHash :
-              "Thread board not restored to the root position: unbalanced make/unmake.";
+                  "Thread board not restored to the root position: unbalanced make/unmake.";
         }
       }));
     }
@@ -583,8 +580,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     double score;
     try {
       score = rootIsWhite ?
-          min(board, depth - 1, alpha, beta, 1) :
-          max(board, depth - 1, alpha, beta, 1);
+              min(board, depth - 1, alpha, beta, 1) :
+              max(board, depth - 1, alpha, beta, 1);
     } finally {
       board.unmakeMove();
     }
@@ -642,7 +639,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, true) :
-          getCachedEvaluation(board, depth);
+              getCachedEvaluation(board, depth);
     }
 
     if (depth <= 0) {
@@ -825,7 +822,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, false) :
-          getCachedEvaluation(board, depth);
+              getCachedEvaluation(board, depth);
     }
 
     if (depth <= 0) {
@@ -952,31 +949,31 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       } finally {
         board.unmakeMove();
       }
-        if (currentValue < currentBeta) {
-          currentBeta = currentValue;
-          bestFoundMove = move;
+      if (currentValue < currentBeta) {
+        currentBeta = currentValue;
+        bestFoundMove = move;
 
-          if (!move.isAttack()) {
-            if (!move.equals(killers[0][ply])) {
-              killers[1][ply] = killers[0][ply];
-              killers[0][ply] = move;
-            }
-          }
-
-          recordCounterMove(board, move);
-
-          if (currentBeta <= alpha) {
-            if (!move.isAttack()) {
-              historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
-            }
-
-            transpositionTable.store(zobristHash, alpha, depth, TranspositionTable.UPPERBOUND, bestFoundMove);
-            return alpha;
+        if (!move.isAttack()) {
+          if (!move.equals(killers[0][ply])) {
+            killers[1][ply] = killers[0][ply];
+            killers[0][ply] = move;
           }
         }
 
-        firstMove = false;
-        movesSearched++;
+        recordCounterMove(board, move);
+
+        if (currentBeta <= alpha) {
+          if (!move.isAttack()) {
+            historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
+          }
+
+          transpositionTable.store(zobristHash, alpha, depth, TranspositionTable.UPPERBOUND, bestFoundMove);
+          return alpha;
+        }
+      }
+
+      firstMove = false;
+      movesSearched++;
     }
 
     byte nodeType = TranspositionTable.EXACT;
@@ -1057,27 +1054,27 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (board.currentPlayer().isInCheck()) {
       return maximizing ?
-          max(board, 1, alpha, beta, ply + 1) :
-          min(board, 1, alpha, beta, ply + 1);
+              max(board, 1, alpha, beta, ply + 1) :
+              min(board, 1, alpha, beta, ply + 1);
     }
 
     List<Move> captures = board.currentPlayer().getLegalMoves().stream()
-        .filter(Move::isAttack)
-        .sorted((m1, m2) -> {
-          boolean isM1Undefended = m1.isAttack() && m1.getAttackedPiece() != null &&
-              !seeEvaluator.isPieceDefended(m1.getAttackedPiece(), board);
-          boolean isM2Undefended = m2.isAttack() && m2.getAttackedPiece() != null &&
-              !seeEvaluator.isPieceDefended(m2.getAttackedPiece(), board);
+            .filter(Move::isAttack)
+            .sorted((m1, m2) -> {
+              boolean isM1Undefended = m1.isAttack() && m1.getAttackedPiece() != null &&
+                      !seeEvaluator.isPieceDefended(m1.getAttackedPiece(), board);
+              boolean isM2Undefended = m2.isAttack() && m2.getAttackedPiece() != null &&
+                      !seeEvaluator.isPieceDefended(m2.getAttackedPiece(), board);
 
-          if (isM1Undefended != isM2Undefended) {
-            return isM1Undefended ? -1 : 1;
-          }
+              if (isM1Undefended != isM2Undefended) {
+                return isM1Undefended ? -1 : 1;
+              }
 
-          int see1 = seeEvaluator.evaluate(board, m1);
-          int see2 = seeEvaluator.evaluate(board, m2);
-          return Integer.compare(see2, see1);
-        })
-        .toList();
+              int see1 = seeEvaluator.evaluate(board, m1);
+              int see2 = seeEvaluator.evaluate(board, m2);
+              return Integer.compare(see2, see1);
+            })
+            .toList();
 
     for (Move move : captures) {
       final int seeScore = seeEvaluator.evaluate(board, move);
@@ -1088,7 +1085,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       final boolean legal = !board.currentPlayer().getOpponent().isInCheck();
       final boolean givesCheck = legal && board.currentPlayer().isInCheck();
       final boolean prunedByExchange = seeScore < SEE_PRUNING_THRESHOLD &&
-          !isUndefendedCapture && !givesCheck;
+              !isUndefendedCapture && !givesCheck;
 
       if (!legal || prunedByExchange) {
         board.unmakeMove();
@@ -1110,7 +1107,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
       if (alpha >= beta) {
         transpositionTable.store(zobristHash, maximizing ? beta : alpha, 0,
-            maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND, null);
+                maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND, null);
         return maximizing ? beta : alpha;
       }
     }
