@@ -7,7 +7,13 @@ import engine.forPlayer.forAI.AlphaBeta;
 
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * The TacticalSuite class runs the engine's search against positions whose winning move is known
@@ -16,10 +22,17 @@ import java.util.List;
  * <p>
  * Each position is searched to a fixed depth rather than for a fixed time, so a run does not depend
  * on how fast the host is. Every position is searched by a freshly constructed engine that is shut
- * down before the next position begins, because the transposition table, history heuristic, and
- * countermove table all survive a search and would otherwise make a result depend on the order the
- * positions are listed in. This class is designed to be run from the command line and its entry
- * point returns a non-zero exit status when any position is failed.
+ * down once the position is finished, because the transposition table, evaluation cache, history
+ * heuristic, and countermove table all survive a search and would otherwise make a result depend on
+ * the order the positions are listed in.
+ * <p>
+ * Positions are searched on several worker threads at once, each running a single-threaded engine.
+ * Nothing is shared between those engines, so a run reports the same result for every position
+ * whatever order the workers happen to finish in. The engines themselves are single-threaded
+ * because a parallel search reaches different results on different runs of the same position.
+ * <p>
+ * This class is designed to be run from the command line and its entry point returns a non-zero
+ * exit status when any position is failed.
  *
  * @author Aaron Ho
  */
@@ -34,6 +47,16 @@ public class TacticalSuite {
    * a parallel search reaches different results on different runs of the same position.
    */
   private static final int SEARCH_THREADS = 1;
+
+  /**
+   * The number of positions searched at once when no worker count is given. Each worker holds a
+   * transposition table for as long as its position is running, so raising this raises peak memory
+   * in proportion.
+   */
+  private static final int DEFAULT_WORKER_THREADS = 4;
+
+  /** The command line flag prefix requesting a number of positions to search at once. */
+  private static final String WORKERS_FLAG_PREFIX = "--workers=";
 
   /** The command line flag requesting that the engine's own search output be left on screen. */
   private static final String VERBOSE_FLAG = "--verbose";
@@ -53,7 +76,7 @@ public class TacticalSuite {
   /**
    * The positions the suite tests, each paired with the moves that win and the depth to search to.
    * The depth recorded against a position is the shallowest one that keeps its tactic inside the
-   * search horizon, and the positions are ordered by that depth so a run fails fast.
+   * search horizon.
    */
   private static final List<TacticalPosition> STANDARD_POSITIONS = List.of(
           new TacticalPosition("Back rank mate",
@@ -89,13 +112,15 @@ public class TacticalSuite {
 
   /**
    * Runs the suite from the command line. With no arguments every position is searched to its own
-   * recorded depth, a single numeric argument overrides that depth for every position, and the
-   * verbose flag leaves the engine's own search output on screen.
+   * recorded depth, a single numeric argument overrides that depth for every position, the workers
+   * flag sets how many positions are searched at once, and the verbose flag leaves the engine's own
+   * search output on screen.
    *
    * @param args The command line arguments, as described by the usage text.
    */
   public static void main(final String[] args) {
     int depthOverride = NO_DEPTH_OVERRIDE;
+    int workerThreads = DEFAULT_WORKER_THREADS;
     boolean verbose = false;
     for (final String argument : args) {
       if (VERBOSE_FLAG.equals(argument)) {
@@ -103,6 +128,14 @@ public class TacticalSuite {
       } else if (HELP_FLAG.equals(argument)) {
         printUsage();
         return;
+      } else if (argument.startsWith(WORKERS_FLAG_PREFIX)) {
+        try {
+          workerThreads = Integer.parseInt(argument.substring(WORKERS_FLAG_PREFIX.length()));
+        } catch (final NumberFormatException exception) {
+          System.out.println("The worker count must be a number: " + argument);
+          printUsage();
+          return;
+        }
       } else {
         try {
           depthOverride = Integer.parseInt(argument);
@@ -118,27 +151,73 @@ public class TacticalSuite {
       printUsage();
       return;
     }
-    System.exit(run(depthOverride, verbose) ? 0 : 1);
+    if (workerThreads < 1) {
+      System.out.println("The worker count must be at least one.");
+      printUsage();
+      return;
+    }
+    System.exit(run(depthOverride, verbose, workerThreads) ? 0 : 1);
   }
 
   /**
-   * Searches every position in the suite and prints a report of the results. Overriding the depth
-   * downwards is expected to fail positions whose tactic no longer fits inside the horizon.
+   * Searches every position in the suite on the default number of workers and prints a report of
+   * the results.
    *
    * @param depthOverride The depth to search every position to, or zero to use each recorded depth.
    * @param verbose Whether to leave the engine's own search output on screen.
    * @return True if every position was solved, false otherwise.
    */
   public static boolean run(final int depthOverride, final boolean verbose) {
-    System.out.printf("Tactical suite: %d positions%s%n%n", STANDARD_POSITIONS.size(),
+    return run(depthOverride, verbose, DEFAULT_WORKER_THREADS);
+  }
+
+  /**
+   * Searches every position in the suite and prints a report of the results. Overriding the depth
+   * downwards is expected to fail positions whose tactic no longer fits inside the horizon. Results
+   * are reported in the order the positions are listed in however the workers are scheduled, and a
+   * verbose run uses a single worker so the engine's output stays readable.
+   *
+   * @param depthOverride The depth to search every position to, or zero to use each recorded depth.
+   * @param verbose Whether to leave the engine's own search output on screen.
+   * @param requestedWorkers The number of positions to search at once, at least one.
+   * @return True if every position was solved, false otherwise.
+   */
+  public static boolean run(final int depthOverride, final boolean verbose,
+                            final int requestedWorkers) {
+    final int workers = verbose ? 1 : Math.min(requestedWorkers, STANDARD_POSITIONS.size());
+    System.out.printf("Tactical suite: %d positions on %d worker%s%s%n%n",
+            STANDARD_POSITIONS.size(), workers, workers == 1 ? "" : "s",
             depthOverride == NO_DEPTH_OVERRIDE ? "" : ", every one searched to depth " + depthOverride);
+
+    final PrintStream originalOut = System.out;
+    final ExecutorService workerPool = Executors.newFixedThreadPool(workers);
+    final List<Future<PositionOutcome>> outcomes = new ArrayList<>(STANDARD_POSITIONS.size());
+    for (int index = 0; index < STANDARD_POSITIONS.size(); index++) {
+      outcomes.add(null);
+    }
+
     int solved = 0;
     final long startTime = System.nanoTime();
-    for (final TacticalPosition position : STANDARD_POSITIONS) {
-      if (runPosition(position, depthOverride, verbose)) {
-        solved++;
-      }
+    if (!verbose) {
+      System.setOut(new PrintStream(OutputStream.nullOutputStream()));
     }
+    try {
+      for (final int index : submissionOrder(depthOverride)) {
+        final TacticalPosition position = STANDARD_POSITIONS.get(index);
+        outcomes.set(index, workerPool.submit(() -> runPosition(position, depthOverride)));
+      }
+      for (int index = 0; index < STANDARD_POSITIONS.size(); index++) {
+        final PositionOutcome outcome = await(outcomes.get(index), STANDARD_POSITIONS.get(index));
+        originalOut.print(outcome.report());
+        if (outcome.solved()) {
+          solved++;
+        }
+      }
+    } finally {
+      System.setOut(originalOut);
+      workerPool.shutdown();
+    }
+
     final double elapsedSeconds = (System.nanoTime() - startTime) / NANOSECONDS_PER_SECOND;
     System.out.printf("%d of %d positions solved in %.2fs%n",
             solved, STANDARD_POSITIONS.size(), elapsedSeconds);
@@ -146,59 +225,101 @@ public class TacticalSuite {
   }
 
   /**
-   * Searches a single position and prints whether the engine chose a move the position accepts.
+   * Returns the indices of the positions in the order they are handed to the workers, deepest
+   * first. Starting the longest searches first keeps a deep position from being picked up last and
+   * running on alone after every other worker has finished.
+   *
+   * @param depthOverride The depth every position is searched to, or zero to use recorded depths.
+   * @return The position indices, ordered by descending search depth.
+   */
+  private static List<Integer> submissionOrder(final int depthOverride) {
+    final List<Integer> order = new ArrayList<>(STANDARD_POSITIONS.size());
+    for (int index = 0; index < STANDARD_POSITIONS.size(); index++) {
+      order.add(index);
+    }
+    if (depthOverride == NO_DEPTH_OVERRIDE) {
+      order.sort(Comparator.comparingInt(
+              (Integer index) -> STANDARD_POSITIONS.get(index).searchDepth()).reversed());
+    }
+    return order;
+  }
+
+  /**
+   * Waits for a position's search to finish and returns its outcome, reporting a failure to
+   * complete as a failed position rather than ending the run.
+   *
+   * @param outcome The pending outcome of the position's search.
+   * @param position The position the search was run against.
+   * @return The outcome of the search.
+   */
+  private static PositionOutcome await(final Future<PositionOutcome> outcome,
+                                       final TacticalPosition position) {
+    try {
+      return outcome.get();
+    } catch (final InterruptedException exception) {
+      Thread.currentThread().interrupt();
+      return abandoned(position, "the search was interrupted");
+    } catch (final ExecutionException exception) {
+      return abandoned(position, "the search threw " + exception.getCause());
+    }
+  }
+
+  /**
+   * Builds the outcome of a position whose search did not produce a move.
+   *
+   * @param position The position the search was run against.
+   * @param reason The reason no move was produced.
+   * @return A failed outcome carrying a report of the reason.
+   */
+  private static PositionOutcome abandoned(final TacticalPosition position, final String reason) {
+    return new PositionOutcome(false, String.format("%s%n  %s%n  FAIL  %s%n%n",
+            position.name(), position.fen(), reason));
+  }
+
+  /**
+   * Searches a single position and builds a report of whether the engine chose a move the position
+   * accepts. Nothing is printed from here, so that reports can be shown in the order the positions
+   * are listed in rather than the order the workers finish in.
    *
    * @param position The position to search.
    * @param depthOverride The depth to search to, or zero to use the position's recorded depth.
-   * @param verbose Whether to leave the engine's own search output on screen.
-   * @return True if the engine chose an accepted move, false otherwise.
+   * @return The outcome of the search.
    */
-  private static boolean runPosition(final TacticalPosition position,
-                                     final int depthOverride,
-                                     final boolean verbose) {
+  private static PositionOutcome runPosition(final TacticalPosition position,
+                                             final int depthOverride) {
     final int depth = depthOverride == NO_DEPTH_OVERRIDE ? position.searchDepth() : depthOverride;
-    System.out.println(position.name());
-    System.out.println("  " + position.fen());
     final Board board;
     try {
       board = FenParser.parse(position.fen());
     } catch (final IllegalArgumentException exception) {
-      System.out.println("  FAIL  the position could not be parsed: " + exception.getMessage());
-      System.out.println();
-      return false;
+      return abandoned(position, "the position could not be parsed: " + exception.getMessage());
     }
     final long startTime = System.nanoTime();
-    final Move chosenMove = search(board, depth, verbose);
+    final Move chosenMove = search(board, depth);
     final double elapsedSeconds = (System.nanoTime() - startTime) / NANOSECONDS_PER_SECOND;
     final String chosenNotation = describe(board, chosenMove);
     final boolean solved = position.accepts(chosenNotation);
-    System.out.printf("  depth %d  expected %-14s chose %-14s %8.2fs  %s%n",
-            depth, String.join(" or ", position.acceptedMoves()), chosenNotation, elapsedSeconds,
+    final String report = String.format("%s%n  %s%n  depth %d  expected %-14s chose %-14s %8.2fs  %s%n%n",
+            position.name(), position.fen(), depth,
+            String.join(" or ", position.acceptedMoves()), chosenNotation, elapsedSeconds,
             solved ? "PASS" : "FAIL");
-    System.out.println();
-    return solved;
+    return new PositionOutcome(solved, report);
   }
 
   /**
    * Searches the given position to the given depth with a single-threaded engine built for this
-   * position alone. The engine is shut down before this returns, so nothing it learned reaches the
-   * next position.
+   * position alone. The engine is shut down before this returns, so nothing it learned reaches any
+   * other position.
    *
    * @param board The position to search.
    * @param depth The depth to search to.
-   * @param verbose Whether to leave the engine's own search output on screen.
    * @return The move the engine chose.
    */
-  private static Move search(final Board board, final int depth, final boolean verbose) {
+  private static Move search(final Board board, final int depth) {
     final AlphaBeta engine = new AlphaBeta(depth, TABLE_SIZE_MB, SEARCH_THREADS);
-    final PrintStream originalOut = System.out;
-    if (!verbose) {
-      System.setOut(new PrintStream(OutputStream.nullOutputStream()));
-    }
     try {
       return engine.execute(board, depth);
     } finally {
-      System.setOut(originalOut);
       engine.shutdown();
     }
   }
@@ -230,14 +351,29 @@ public class TacticalSuite {
   private static void printUsage() {
     System.out.println("""
             Usage:
-              TacticalSuite [depth] [--verbose]        search every position, each to its own depth
+              TacticalSuite [depth] [--workers=N] [--verbose]
               TacticalSuite --help                     print this message
 
             A depth argument overrides the depth recorded against every position. Positions are
             recorded at the shallowest depth that keeps the tactic inside the search horizon, so
-            overriding downwards is expected to fail some of them. The suite exits with a non-zero
-            status when any position is failed.""");
+            overriding downwards is expected to fail some of them.
+
+            The workers flag sets how many positions are searched at once, four by default. Every
+            worker holds a transposition table for as long as its position is running, so raising
+            it raises peak memory in proportion. A verbose run uses one worker whatever is asked
+            for, so that the engine's own output stays readable.
+
+            The suite exits with a non-zero status when any position is failed.""");
   }
+
+  /**
+   * The PositionOutcome record pairs the result of a position's search with the report to print
+   * for it.
+   *
+   * @param solved Whether the engine chose a move the position accepts.
+   * @param report The text describing the position and the move that was chosen.
+   */
+  private record PositionOutcome(boolean solved, String report) { }
 
   /**
    * The TacticalPosition record pairs a position with the moves that solve it and the depth to
