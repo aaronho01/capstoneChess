@@ -29,6 +29,12 @@ public class TacticalSuite {
   /** The size of the transposition table given to each engine, in megabytes. */
   private static final int TABLE_SIZE_MB = 64;
 
+  /**
+   * The number of search threads given to each engine. This is one so that a run is reproducible:
+   * a parallel search reaches different results on different runs of the same position.
+   */
+  private static final int SEARCH_THREADS = 1;
+
   /** The command line flag requesting that the engine's own search output be left on screen. */
   private static final String VERBOSE_FLAG = "--verbose";
 
@@ -174,8 +180,9 @@ public class TacticalSuite {
   }
 
   /**
-   * Searches the given position to the given depth with an engine built for this position alone.
-   * The engine is shut down before this returns, so nothing it learned reaches the next position.
+   * Searches the given position to the given depth with a single-threaded engine built for this
+   * position alone. The engine is shut down before this returns, so nothing it learned reaches the
+   * next position.
    *
    * @param board The position to search.
    * @param depth The depth to search to.
@@ -183,7 +190,7 @@ public class TacticalSuite {
    * @return The move the engine chose.
    */
   private static Move search(final Board board, final int depth, final boolean verbose) {
-    final AlphaBeta engine = new AlphaBeta(depth, TABLE_SIZE_MB);
+    final AlphaBeta engine = new AlphaBeta(depth, TABLE_SIZE_MB, SEARCH_THREADS);
     final PrintStream originalOut = System.out;
     if (!verbose) {
       System.setOut(new PrintStream(OutputStream.nullOutputStream()));

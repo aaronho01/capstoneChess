@@ -309,19 +309,38 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
   /**
    * Constructs an AlphaBeta chess engine with the given default search depth and transposition
-   * table size. The table is allocated once here and serves every search this engine runs.
+   * table size, searching on one thread per available processor.
    *
    * @param maxDepth The depth used by {@link #execute(Board)} when no depth is supplied per search.
    * @param tableSizeMB The size of the transposition table in megabytes, at least one.
    * @throws IllegalArgumentException If the requested table size is less than one megabyte.
    */
   public AlphaBeta(final int maxDepth, final int tableSizeMB) {
+    this(maxDepth, tableSizeMB, Runtime.getRuntime().availableProcessors());
+  }
+
+  /**
+   * Constructs an AlphaBeta chess engine with the given default search depth, transposition table
+   * size, and search thread count. The table is allocated once here and serves every search this
+   * engine runs. A thread count of one makes the search reproducible, since parallel search results
+   * depend on thread timing.
+   *
+   * @param maxDepth The depth used by {@link #execute(Board)} when no depth is supplied per search.
+   * @param tableSizeMB The size of the transposition table in megabytes, at least one.
+   * @param threadCount The number of search threads, at least one.
+   * @throws IllegalArgumentException If the requested table size or thread count is less than one.
+   */
+  public AlphaBeta(final int maxDepth, final int tableSizeMB, final int threadCount) {
     if (tableSizeMB < 1) {
       throw new IllegalArgumentException(
               "The transposition table needs at least one megabyte, requested " + tableSizeMB);
     }
+    if (threadCount < 1) {
+      throw new IllegalArgumentException(
+              "The search needs at least one thread, requested " + threadCount);
+    }
     this.maxDepth = maxDepth;
-    this.threadCount = Runtime.getRuntime().availableProcessors();
+    this.threadCount = threadCount;
     this.searchThreadPool = Executors.newFixedThreadPool(threadCount);
     this.transpositionTable = new StripedTranspositionTable(tableSizeMB);
 
