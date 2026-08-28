@@ -60,6 +60,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** Thread-safe transposition table for storing previously evaluated positions. */
   private final StripedTranspositionTable transpositionTable;
 
+  /** Cache of board evaluations belonging to this engine, cleared at the start of each search. */
+  private final EvaluationCache evaluationCache = new EvaluationCache();
+
   /** History heuristic table for move ordering, indexed by origin and destination square. */
   private final int[][] historyHeuristic = new int[64][64];
 
@@ -398,7 +401,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     this.highestSeenValue = Double.NEGATIVE_INFINITY;
     this.lowestSeenValue = Double.POSITIVE_INFINITY;
 
-    EvaluationCache.get().clear();
+    this.evaluationCache.clear();
 
     for (int currentDepth = 1; currentDepth <= searchDepth && !searchStopped; currentDepth++) {
       if (currentDepth >= 3) {
@@ -416,7 +419,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
               bestMove, currentDepth, evaluatedPositions,
               executionTime / 1000.0,
               evaluatedPositions / (executionTime / 1000.0),
-              EvaluationCache.get().getStats());
+              this.evaluationCache.getStats());
 
       System.out.println(result);
       setChanged();
@@ -443,13 +446,13 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * @return The evaluation score for the board position.
    */
   private double getCachedEvaluation(Board board, int depth) {
-    Double cachedScore = EvaluationCache.get().probe(board, depth);
+    Double cachedScore = this.evaluationCache.probe(board, depth);
     if (cachedScore != null) {
       return cachedScore;
     }
 
     double score = this.evaluator.evaluate(board, depth);
-    EvaluationCache.get().store(board, depth, score);
+    this.evaluationCache.store(board, depth, score);
     return score;
   }
 

@@ -10,15 +10,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * during search operations. It uses Zobrist hashing combined with search depth as the cache key for efficient and
  * accurate lookups. The cache automatically manages its size by evicting entries when it reaches capacity limits.
  * <p>
- * This class follows the singleton pattern to ensure consistent caching across the entire chess engine.
- * Cache statistics are maintained to monitor hit rates and performance characteristics.
+ * Each cache belongs to the engine that constructed it, so two engines running at the same time neither share entries
+ * nor clear one another's. Cache statistics are maintained to monitor hit rates and performance characteristics.
  *
  * @author Aaron Ho
  */
 public class EvaluationCache {
-
-  /** The singleton instance of the EvaluationCache. */
-  private static final EvaluationCache INSTANCE = new EvaluationCache();
 
   /** The concurrent hash map storing cached evaluation scores indexed by cache keys. */
   private final ConcurrentHashMap<CacheKey, Double> cache;
@@ -33,20 +30,10 @@ public class EvaluationCache {
   private long misses = 0;
 
   /**
-   * Constructs a new EvaluationCache with initial capacity set to half the maximum size.
-   * This constructor is private to enforce the singleton pattern.
+   * Constructs a new empty EvaluationCache. The table grows on demand up to the maximum size.
    */
-  private EvaluationCache() {
-    this.cache = new ConcurrentHashMap<>(MAX_SIZE / 2);
-  }
-
-  /**
-   * Returns the singleton instance of the EvaluationCache.
-   *
-   * @return The singleton EvaluationCache instance.
-   */
-  public static EvaluationCache get() {
-    return INSTANCE;
+  public EvaluationCache() {
+    this.cache = new ConcurrentHashMap<>();
   }
 
   /**
