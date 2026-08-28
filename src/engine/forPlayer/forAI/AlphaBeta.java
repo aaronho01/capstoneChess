@@ -107,6 +107,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The score of a checkmate delivered at the root, reduced by one for each ply to the mate. */
   private static final double MATE_VALUE = 1000000;
 
+  /** The lowest magnitude at which a score is a checkmate score rather than an evaluation. */
+  private static final double MATE_THRESHOLD = MATE_VALUE - MAX_SEARCH_DEPTH;
+
   /** The highest evaluation value seen during aspiration search.
    * Reset at the start of each search. */
   private double highestSeenValue = Double.NEGATIVE_INFINITY;
@@ -662,6 +665,43 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
+   * Converts a score into the form the transposition table stores. A checkmate score counts plies
+   * from the root, which makes it a property of the path to the position rather than of the
+   * position, so it is rewritten to count plies from this node before it is stored.
+   *
+   * @param score The score as the search produced it.
+   * @param ply The current search ply, counted from the root.
+   * @return The score to store against the position's key.
+   */
+  private static double scoreToTable(final double score, final int ply) {
+    if (score >= MATE_THRESHOLD) {
+      return score + ply;
+    }
+    if (score <= -MATE_THRESHOLD) {
+      return score - ply;
+    }
+    return score;
+  }
+
+  /**
+   * Converts a score read from the transposition table back into a score counted from the root,
+   * reversing {@link #scoreToTable}.
+   *
+   * @param score The score as it was stored.
+   * @param ply The current search ply, counted from the root.
+   * @return The score as the search at this ply should read it.
+   */
+  private static double scoreFromTable(final double score, final int ply) {
+    if (score >= MATE_THRESHOLD) {
+      return score - ply;
+    }
+    if (score <= -MATE_THRESHOLD) {
+      return score + ply;
+    }
+    return score;
+  }
+
+  /**
    * Implements the maximizing player portion of the alpha-beta search algorithm
    * with various pruning techniques and search extensions.
    *
@@ -688,15 +728,16 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     long zobristHash = board.getZobristHash();
     TranspositionTable.Entry entry = transpositionTable.get(zobristHash);
     if (entry != null && entry.depth >= depth) {
+      final double entryScore = scoreFromTable(entry.score, ply);
       if (entry.nodeType == TranspositionTable.EXACT) {
-        return entry.score;
+        return entryScore;
       } else if (entry.nodeType == TranspositionTable.LOWERBOUND) {
-        alpha = Math.max(alpha, entry.score);
+        alpha = Math.max(alpha, entryScore);
       } else if (entry.nodeType == TranspositionTable.UPPERBOUND) {
-        beta = Math.min(beta, entry.score);
+        beta = Math.min(beta, entryScore);
       }
       if (alpha >= beta) {
-        return entry.score;
+        return entryScore;
       }
     }
 
@@ -824,7 +865,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
           }
 
-          transpositionTable.store(zobristHash, beta, depth, TranspositionTable.LOWERBOUND, bestFoundMove);
+          transpositionTable.store(zobristHash, scoreToTable(beta, ply), depth,
+                  TranspositionTable.LOWERBOUND, bestFoundMove);
           return beta;
         }
       }
@@ -839,7 +881,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (currentAlpha >= beta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, currentAlpha, depth, nodeType, bestFoundMove);
+    transpositionTable.store(zobristHash, scoreToTable(currentAlpha, ply), depth, nodeType, bestFoundMove);
 
     return currentAlpha;
   }
@@ -871,15 +913,16 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     long zobristHash = board.getZobristHash();
     TranspositionTable.Entry entry = transpositionTable.get(zobristHash);
     if (entry != null && entry.depth >= depth) {
+      final double entryScore = scoreFromTable(entry.score, ply);
       if (entry.nodeType == TranspositionTable.EXACT) {
-        return entry.score;
+        return entryScore;
       } else if (entry.nodeType == TranspositionTable.LOWERBOUND) {
-        alpha = Math.max(alpha, entry.score);
+        alpha = Math.max(alpha, entryScore);
       } else if (entry.nodeType == TranspositionTable.UPPERBOUND) {
-        beta = Math.min(beta, entry.score);
+        beta = Math.min(beta, entryScore);
       }
       if (alpha >= beta) {
-        return entry.score;
+        return entryScore;
       }
     }
 
@@ -1006,7 +1049,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
           }
 
-          transpositionTable.store(zobristHash, alpha, depth, TranspositionTable.UPPERBOUND, bestFoundMove);
+          transpositionTable.store(zobristHash, scoreToTable(alpha, ply), depth,
+                  TranspositionTable.UPPERBOUND, bestFoundMove);
           return alpha;
         }
       }
@@ -1021,7 +1065,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (currentBeta >= beta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, currentBeta, depth, nodeType, bestFoundMove);
+    transpositionTable.store(zobristHash, scoreToTable(currentBeta, ply), depth, nodeType, bestFoundMove);
 
     return currentBeta;
   }
@@ -1053,15 +1097,16 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     long zobristHash = board.getZobristHash();
     TranspositionTable.Entry entry = transpositionTable.get(zobristHash);
     if (entry != null) {
+      final double entryScore = scoreFromTable(entry.score, ply);
       if (entry.nodeType == TranspositionTable.EXACT) {
-        return entry.score;
+        return entryScore;
       } else if (entry.nodeType == TranspositionTable.LOWERBOUND) {
-        alpha = Math.max(alpha, entry.score);
+        alpha = Math.max(alpha, entryScore);
       } else if (entry.nodeType == TranspositionTable.UPPERBOUND) {
-        beta = Math.min(beta, entry.score);
+        beta = Math.min(beta, entryScore);
       }
       if (alpha >= beta) {
-        return entry.score;
+        return entryScore;
       }
     }
 
@@ -1076,13 +1121,15 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (maximizing) {
       if (standPat >= beta) {
-        transpositionTable.store(zobristHash, beta, 0, TranspositionTable.LOWERBOUND, null);
+        transpositionTable.store(zobristHash, scoreToTable(beta, ply), 0,
+                TranspositionTable.LOWERBOUND, null);
         return beta;
       }
       if (standPat > alpha) alpha = standPat;
     } else {
       if (standPat <= alpha) {
-        transpositionTable.store(zobristHash, alpha, 0, TranspositionTable.UPPERBOUND, null);
+        transpositionTable.store(zobristHash, scoreToTable(alpha, ply), 0,
+                TranspositionTable.UPPERBOUND, null);
         return alpha;
       }
       if (standPat < beta) beta = standPat;
@@ -1145,7 +1192,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
 
       if (alpha >= beta) {
-        transpositionTable.store(zobristHash, maximizing ? beta : alpha, 0,
+        transpositionTable.store(zobristHash, scoreToTable(maximizing ? beta : alpha, ply), 0,
                 maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND, null);
         return maximizing ? beta : alpha;
       }
@@ -1158,7 +1205,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (finalScore >= originalBeta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, finalScore, 0, nodeType, null);
+    transpositionTable.store(zobristHash, scoreToTable(finalScore, ply), 0, nodeType, null);
     return finalScore;
   }
 
