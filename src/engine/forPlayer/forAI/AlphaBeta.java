@@ -648,6 +648,26 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
+   * Returns whether the position at a node below the root is to be scored as a draw without
+   * being searched. A position that has already been reached once on the path to this node, or
+   * that has reached the fifty-move limit without the side to move being checkmated, is drawn.
+   * A position reached through a null move is never treated as drawn, since it was never reached
+   * in a real game.
+   *
+   * @param board The board at the current node.
+   * @return True if the node is to be scored as a draw.
+   */
+  private static boolean isDrawnByRule(final Board board) {
+    if (board.getTransitionMove() == MoveFactory.getNullMove()) {
+      return false;
+    }
+    if (board.isFiftyMoveRule()) {
+      return !board.currentPlayer().isInCheckMate();
+    }
+    return board.repetitionCount() >= 2;
+  }
+
+  /**
    * Scores a position in which the side to move has no legal moves. A checkmate scores
    * {@link #MATE_VALUE} against the mated side, reduced by the ply at which it occurs so that
    * shorter mates outrank longer ones, and a stalemate scores as a draw.
@@ -716,12 +736,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
 
-    if (searchStopped) {
+    if (ply > 0 && isDrawnByRule(board)) {
+      return 0;
+    } if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, true) :
               getCachedEvaluation(board, depth);
-    }
-
-    if (depth <= 0) {
+    } if (depth <= 0) {
       return quiescenceSearch(board, alpha, beta, ply, true);
     }
 
@@ -901,12 +921,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
 
-    if (searchStopped) {
+    if (ply > 0 && isDrawnByRule(board)) {
+      return 0;
+    } if (searchStopped) {
       return depth <= 0 ? quiescenceSearch(board, alpha, beta, ply, false) :
               getCachedEvaluation(board, depth);
-    }
-
-    if (depth <= 0) {
+    } if (depth <= 0) {
       return quiescenceSearch(board, alpha, beta, ply, false);
     }
 
