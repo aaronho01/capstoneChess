@@ -104,6 +104,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The static exchange evaluation threshold for pruning bad captures. */
   private static final int SEE_PRUNING_THRESHOLD = -20;
 
+  /** The score of a checkmate delivered at the root, reduced by one for each ply to the mate. */
+  private static final double MATE_VALUE = 1000000;
+
   /** The highest evaluation value seen during aspiration search.
    * Reset at the start of each search. */
   private double highestSeenValue = Double.NEGATIVE_INFINITY;
@@ -623,6 +626,23 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
+   * Scores a position in which the side to move has no legal moves. A checkmate scores
+   * {@link #MATE_VALUE} against the mated side, reduced by the ply at which it occurs so that
+   * shorter mates outrank longer ones, and a stalemate scores as a draw.
+   *
+   * @param board The terminal board position.
+   * @param ply The current search ply, counted from the root.
+   * @return The terminal score, positive when Black is mated and negative when White is mated.
+   */
+  private double terminalScore(final Board board, final int ply) {
+    if (!board.currentPlayer().isInCheckMate()) {
+      return 0;
+    }
+    final double mateScore = MATE_VALUE - ply;
+    return board.currentPlayer().getAlliance().isWhite() ? -mateScore : mateScore;
+  }
+
+  /**
    * Implements the maximizing player portion of the alpha-beta search algorithm
    * with various pruning techniques and search extensions.
    *
@@ -662,7 +682,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
 
     if (BoardUtils.isEndOfGame(board)) {
-      return getCachedEvaluation(board, depth);
+      return terminalScore(board, ply);
     }
 
     final boolean inCheckAtNode = board.currentPlayer().isInCheck();
@@ -845,7 +865,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
 
     if (BoardUtils.isEndOfGame(board)) {
-      return getCachedEvaluation(board, depth);
+      return terminalScore(board, ply);
     }
 
     final boolean inCheckAtNode = board.currentPlayer().isInCheck();
@@ -1027,7 +1047,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
 
     if (BoardUtils.isEndOfGame(board)) {
-      return getCachedEvaluation(board, 0);
+      return terminalScore(board, ply);
     }
 
     final double originalAlpha = alpha;
