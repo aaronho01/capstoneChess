@@ -648,6 +648,10 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         bestScore = score;
         bestMove = move;
         recordCounterMove(board, move);
+
+        if (rootIsWhite ? bestScore >= beta : bestScore <= alpha) {
+          break;
+        }
       }
     }
 
