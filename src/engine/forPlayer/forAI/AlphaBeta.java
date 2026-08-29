@@ -77,6 +77,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The maximum number of quiescence search nodes allowed per search. */
   private static final int MAX_QUIESCENCE = 300000;
 
+  /** The node limit that lets a search run to the depth it was asked for. */
+  public static final long UNLIMITED_NODES = Long.MAX_VALUE;
+
   /** Maximum search depth supported by data structures. */
   private static final int MAX_SEARCH_DEPTH = 100;
 
@@ -375,6 +378,10 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     return execute(board, this.maxDepth);
   }
 
+  public Move execute(final Board board, final int searchDepth) {
+    return execute(board, searchDepth, UNLIMITED_NODES);
+  }
+
   /**
    * Executes the alpha-beta search algorithm with iterative deepening to find the best move for
    * the current player, to the given depth.
@@ -393,7 +400,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * @param searchDepth The maximum depth for iterative deepening on this search.
    * @return The best move determined by the search algorithm.
    */
-  public Move execute(final Board board, final int searchDepth) {
+  public Move execute(final Board board, final int searchDepth, final long nodeLimit) {
     final long startTime = System.currentTimeMillis();
     Move bestMove = MoveFactory.getNullMove();
     double bestScore = 0;
@@ -409,18 +416,20 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     final long rootHash = mainBoard.getZobristHash();
     final List<Future<?>> helpers = startHelperSearches(board, searchDepth);
 
+    final SearchStats stats = new SearchStats();
+    this.threadStats.set(stats);
+
     try {
       for (int currentDepth = 1; currentDepth <= searchDepth && !searchStopped; currentDepth++) {
-        final SearchStats stats = new SearchStats();
-        this.threadStats.set(stats);
+        stats.quiescenceCount = 0;
+        stats.nodeLimit = currentDepth == 1 ? UNLIMITED_NODES : nodeLimit;
 
-        RootResult result;
-        try {
-          result = currentDepth >= 4 ?
-                  searchRootAspirationWindow(mainBoard, currentDepth, bestMove, bestScore) :
-                  searchRoot(mainBoard, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
-        } finally {
-          this.boardsEvaluated.addAndGet(stats.boardsEvaluated);
+        final RootResult result = currentDepth >= 4 ?
+                searchRootAspirationWindow(mainBoard, currentDepth, bestMove, bestScore) :
+                searchRoot(mainBoard, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
+
+        if (result.move() == MoveFactory.getNullMove()) {
+          break;
         }
 
         bestMove = result.move();
@@ -428,7 +437,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
         updateHistoryHeuristic(bestMove, currentDepth);
 
-        final long evaluatedPositions = this.boardsEvaluated.get();
+        final long evaluatedPositions = this.boardsEvaluated.get() + stats.boardsEvaluated;
         final long executionTime = System.currentTimeMillis() - startTime;
         final String report = String.format(
                 "%s | depth = %d | boards evaluated = %d | time = %.2f sec | nps = %.2f | %s",
@@ -443,6 +452,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     } finally {
       stopHelperSearches(helpers);
+      this.boardsEvaluated.addAndGet(stats.boardsEvaluated);
     }
 
     assert mainBoard.getZobristHash() == rootHash :
@@ -547,8 +557,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * Searches the root with a narrow window centered on the score of the previous iteration. A
    * search whose score reaches or passes a bound is discarded and repeated with that bound moved
    * out and the window doubled, until the score lands strictly inside the window or the window
-   * grows past {@link #MAX_ASPIRATION_WINDOW} and a full window is used. A checkmate score from
-   * the previous iteration is never narrowed.
+   * and full window is used. A checkmate score from the previous iteration is never narrowed.
    *
    * @param board The board this search thread owns, in the root position.
    * @param depth The current search depth.
@@ -585,9 +594,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /**
    * Searches every legal root move on the calling thread and returns the best one with its score.
    * The move that was best in the previous iteration is searched first, and each move is searched
-   * against a window narrowed to the best score found so far. A root move that leaves
-   * the mover in check is skipped, and a search that is stopped part way returns the best move
-   * found up to that point.
+   * against a window narrowed to the best score found so far. A root move that leaves the mover in
+   * check is skipped. A search that is stopped part way returns the best move found up to that point,
+   * and the null move if it finished no move at all
    *
    * @param board The board this search thread owns, in the root position. It is left in that
    *              position when this method returns.
@@ -613,7 +622,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
 
     final boolean rootIsWhite = board.currentPlayer().getAlliance().isWhite();
-    Move bestMove = rootMoves.get(0);
+    Move bestMove = MoveFactory.getNullMove();
     double bestScore = rootIsWhite ? alpha : beta;
 
     for (final Move move : rootMoves) {
@@ -777,6 +786,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double max(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
+    if (stats.boardsEvaluated >= stats.nodeLimit) {
+      this.searchStopped = true;
+    }
 
     if (ply > 0 && isDrawnByRule(board)) {
       return 0;
@@ -964,6 +976,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double min(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
+    if (stats.boardsEvaluated >= stats.nodeLimit) {
+      this.searchStopped = true;
+    }
 
     if (ply > 0 && isDrawnByRule(board)) {
       return 0;
@@ -1150,6 +1165,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double quiescenceSearch(Board board, double alpha, double beta, int ply, boolean maximizing) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
+    if (stats.boardsEvaluated >= stats.nodeLimit) {
+      this.searchStopped = true;
+    }
 
     if (searchStopped) {
       return getCachedEvaluation(board, 0);
@@ -1326,6 +1344,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     long boardsEvaluated;
     /** The number of quiescence search nodes explored by this thread. */
     int quiescenceCount;
+    /** The node count at which this thread stops the search. */
+    long nodeLimit = UNLIMITED_NODES;
   }
 
   /**
