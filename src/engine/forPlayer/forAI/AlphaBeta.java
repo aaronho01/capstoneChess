@@ -80,6 +80,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** Maximum search depth supported by data structures. */
   private static final int MAX_SEARCH_DEPTH = 100;
 
+  /** The ply at which a node is evaluated rather than searched, bounding search recursion. */
+  private static final int MAX_PLY = MAX_SEARCH_DEPTH - 2;
+
   /** The transposition table size in megabytes used when a caller does not specify one. */
   private static final int DEFAULT_TABLE_SIZE_MB = 256;
 
@@ -766,6 +769,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
               getCachedEvaluation(board, depth);
     } if (depth <= 0) {
       return quiescenceSearch(board, alpha, beta, ply, true);
+    } if (ply >= MAX_PLY) {
+      return getCachedEvaluation(board, depth);
     }
 
     long zobristHash = board.getZobristHash();
@@ -790,7 +795,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     final boolean inCheckAtNode = board.currentPlayer().isInCheck();
 
-    if (depth == 1) {
+    if (depth == 1 && !inCheckAtNode) {
       double eval = getCachedEvaluation(board, depth);
       if (eval + RAZOR_MARGIN < alpha) {
         return quiescenceSearch(board, alpha, beta, ply, true);
@@ -951,6 +956,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
               getCachedEvaluation(board, depth);
     } if (depth <= 0) {
       return quiescenceSearch(board, alpha, beta, ply, false);
+    } if (ply >= MAX_PLY) {
+      return getCachedEvaluation(board, depth);
     }
 
     long zobristHash = board.getZobristHash();
@@ -975,7 +982,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     final boolean inCheckAtNode = board.currentPlayer().isInCheck();
 
-    if (depth == 1) {
+    if (depth == 1 && !inCheckAtNode) {
       double eval = getCachedEvaluation(board, depth);
       if (eval - RAZOR_MARGIN > beta) {
         return quiescenceSearch(board, alpha, beta, ply, false);
@@ -1132,7 +1139,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       return getCachedEvaluation(board, 0);
     }
 
-    if (stats.quiescenceCount >= MAX_QUIESCENCE) {
+    if (stats.quiescenceCount >= MAX_QUIESCENCE || ply >= MAX_PLY) {
       return getCachedEvaluation(board, 0);
     }
     stats.quiescenceCount++;
