@@ -1334,7 +1334,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
      * @return The read-write lock for the hash value.
      */
     private ReadWriteLock getLock(long hash) {
-      return locks[(int)(hash & (LOCK_COUNT - 1))];
+      return locks[(int) ((hash & mask) >>> 1) & (LOCK_COUNT - 1)];
     }
 
     /**
@@ -1354,7 +1354,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
      * @return The transposition table entry if found, null otherwise.
      */
     public TranspositionTable.Entry get(long zobristHash) {
-      int index = (int) (zobristHash & mask);
+      int index = (int) (zobristHash & mask) & ~1;
 
       ReadWriteLock lock = getLock(zobristHash);
       lock.readLock().lock();
@@ -1364,8 +1364,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           return copyOf(entry);
         }
 
-        int index2 = (index ^ (int) (zobristHash >>> 32)) & mask;
-        TranspositionTable.Entry entry2 = table[index2];
+        TranspositionTable.Entry entry2 = table[index + 1];
         if (entry2.key == zobristHash && entry2.key != 0) {
           return copyOf(entry2);
         }
@@ -1403,14 +1402,13 @@ public class AlphaBeta extends Observable implements MoveStrategy {
      * @param nodeType The type of node (exact, lower bound, upper bound).
      */
     public void store(long zobristHash, double score, int depth, byte nodeType, Move bestMove) {
-      int index = (int) (zobristHash & mask);
+      int index = (int) (zobristHash & mask) & ~1;
 
       ReadWriteLock lock = getLock(zobristHash);
       lock.writeLock().lock();
       try {
         TranspositionTable.Entry entry = table[index];
-        int index2 = (index ^ (int)(zobristHash >>> 32)) & mask;
-        TranspositionTable.Entry entry2 = table[index2];
+        TranspositionTable.Entry entry2 = table[index + 1];
 
         boolean useFirst = shouldReplace(entry, entry2, depth, nodeType);
         TranspositionTable.Entry target = useFirst ? entry : entry2;
