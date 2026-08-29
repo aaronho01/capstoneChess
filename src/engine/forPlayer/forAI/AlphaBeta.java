@@ -9,11 +9,10 @@ import engine.forPiece.Piece;
 import engine.forPlayer.Player;
 
 import java.util.*;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -28,9 +27,10 @@ import static engine.forBoard.Move.MoveFactory;
  * quiescence search, null move pruning, late move reductions, and various move ordering
  * heuristics to achieve high-performance chess move selection.
  * <p>
- * The engine uses multiple threads with the Young Brothers Wait concept to improve search
- * efficiency while maintaining search quality. It incorporates modern pruning techniques
- * and evaluation caching to reduce the search space and improve performance.
+ * The engine searches on several threads at once. Every thread runs its own iterative deepening
+ * over a private copy of the position and shares nothing but the transposition table, so a helper
+ * thread contributes by filling that table rather than by returning a move. It incorporates modern
+ * pruning techniques and evaluation caching to reduce the search space and improve performance.
  *
  * @author Aaron Ho
  */
@@ -48,13 +48,13 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** Thread-local search statistics for tracking per-thread performance metrics. */
   private final ThreadLocal<SearchStats> threadStats = new ThreadLocal<>();
 
-  /** The number of threads to use for parallel search operations. */
+  /** The number of search threads, including the thread that calls the search. */
   private final int threadCount;
 
   /** Flag indicating whether the search should be stopped. */
   private volatile boolean searchStopped;
 
-  /** Thread pool executor for managing search worker threads. */
+  /** Thread pool holding this engine's helper search threads. */
   private final ExecutorService searchThreadPool;
 
   /** Thread-safe transposition table for storing previously evaluated positions. */
@@ -112,14 +112,6 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
   /** The lowest magnitude at which a score is a checkmate score rather than an evaluation. */
   private static final double MATE_THRESHOLD = MATE_VALUE - MAX_SEARCH_DEPTH;
-
-  /** The highest evaluation value seen during aspiration search.
-   * Reset at the start of each search. */
-  private double highestSeenValue = Double.NEGATIVE_INFINITY;
-
-  /** The lowest evaluation value seen during aspiration search.
-   * Reset at the start of each search. */
-  private double lowestSeenValue = Double.POSITIVE_INFINITY;
 
   /** Reference to the static exchange evaluator for move evaluation. */
   private final StaticExchangeEvaluator seeEvaluator = StaticExchangeEvaluator.get();
@@ -327,9 +319,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
   /**
    * Constructs an AlphaBeta chess engine with the given default search depth, transposition table
-   * size, and search thread count. The table is allocated once here and serves every search this
-   * engine runs. A thread count of one makes the search reproducible, since parallel search results
-   * depend on thread timing.
+   * size, and search thread count. The count includes the thread that calls
+   * {@link #execute(Board, int)}, so a count of one searches on the calling thread alone and makes
+   * the search reproducible, since a search with helper threads reaches different results on
+   * different runs of the same position. The table is allocated once here and serves every search
+   * this engine runs.
    *
    * @param maxDepth The depth used by {@link #execute(Board)} when no depth is supplied per search.
    * @param tableSizeMB The size of the transposition table in megabytes, at least one.
@@ -347,7 +341,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
     this.maxDepth = maxDepth;
     this.threadCount = threadCount;
-    this.searchThreadPool = Executors.newFixedThreadPool(threadCount);
+    this.searchThreadPool = Executors.newFixedThreadPool(Math.max(1, threadCount - 1));
     this.transpositionTable = new StripedTranspositionTable(tableSizeMB);
 
     for (int i = 0; i < 64; i++) {
@@ -379,12 +373,18 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Executes the alpha-beta search algorithm with iterative deepening and parallel search to find
-   * the best move for the current player, to the given depth.
+   * Executes the alpha-beta search algorithm with iterative deepening to find the best move for
+   * the current player, to the given depth.
    * <p>
-   * The thread pool, transposition table, history heuristic, and countermove table survive this
-   * call and carry into the next search. A caller that is finished with this engine must call
-   * {@link #shutdown()}.
+   * The calling thread is the main search thread and its result is the one returned. Every other
+   * search thread runs its own independent iterative deepening over a private copy of the position
+   * and its results are discarded, so the only thing those threads contribute is the entries they
+   * leave in the shared transposition table. They are stopped as soon as the main search finishes,
+   * and this method does not return until they have.
+   * <p>
+   * The board handed to this method is never modified. The thread pool, transposition table,
+   * history heuristic, and countermove table survive this call and carry into the next search.
+   * A caller that is finished with this engine must call {@link #shutdown()}.
    *
    * @param board The current chess board position.
    * @param searchDepth The maximum depth for iterative deepening on this search.
@@ -393,40 +393,124 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   public Move execute(final Board board, final int searchDepth) {
     final long startTime = System.currentTimeMillis();
     Move bestMove = MoveFactory.getNullMove();
+    double bestScore = 0;
 
     this.searchStopped = false;
     this.boardsEvaluated.set(0);
     this.transpositionTable.incrementAge();
     this.evaluator = determineGameState(board);
-    this.highestSeenValue = Double.NEGATIVE_INFINITY;
-    this.lowestSeenValue = Double.POSITIVE_INFINITY;
 
     this.evaluationCache.clear();
 
-    for (int currentDepth = 1; currentDepth <= searchDepth && !searchStopped; currentDepth++) {
-      if (currentDepth >= 3) {
-        bestMove = searchRootAspirationWindow(board, currentDepth, bestMove);
-      } else {
-        bestMove = searchRootParallel(board, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
+    final Board mainBoard = board.copy();
+    final long rootHash = mainBoard.getZobristHash();
+    final List<Future<?>> helpers = startHelperSearches(board, searchDepth);
+
+    try {
+      for (int currentDepth = 1; currentDepth <= searchDepth && !searchStopped; currentDepth++) {
+        final SearchStats stats = new SearchStats();
+        this.threadStats.set(stats);
+
+        RootResult result;
+        try {
+          result = currentDepth >= 3 ?
+                  searchRootAspirationWindow(mainBoard, currentDepth, bestMove, bestScore) :
+                  searchRoot(mainBoard, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
+        } finally {
+          this.boardsEvaluated.addAndGet(stats.boardsEvaluated);
+        }
+
+        bestMove = result.move();
+        bestScore = result.score();
+
+        updateHistoryHeuristic(bestMove, currentDepth);
+
+        final long evaluatedPositions = this.boardsEvaluated.get();
+        final long executionTime = System.currentTimeMillis() - startTime;
+        final String report = String.format(
+                "%s | depth = %d | boards evaluated = %d | time = %.2f sec | nps = %.2f | %s",
+                bestMove, currentDepth, evaluatedPositions,
+                executionTime / 1000.0,
+                evaluatedPositions / (executionTime / 1000.0),
+                this.evaluationCache.getStats());
+
+        System.out.println(report);
+        setChanged();
+        notifyObservers(report);
       }
-
-      updateHistoryHeuristic(bestMove, currentDepth);
-
-      final long evaluatedPositions = this.boardsEvaluated.get();
-      final long executionTime = System.currentTimeMillis() - startTime;
-      final String result = String.format(
-              "%s | depth = %d | boards evaluated = %d | time = %.2f sec | nps = %.2f | %s",
-              bestMove, currentDepth, evaluatedPositions,
-              executionTime / 1000.0,
-              evaluatedPositions / (executionTime / 1000.0),
-              this.evaluationCache.getStats());
-
-      System.out.println(result);
-      setChanged();
-      notifyObservers(result);
+    } finally {
+      stopHelperSearches(helpers);
     }
 
+    assert mainBoard.getZobristHash() == rootHash :
+            "The main search left its board somewhere other than the root position.";
+
     return bestMove;
+  }
+
+  /**
+   * Starts a search thread for every search thread this engine owns beyond the calling one. Each
+   * is given its own copy of the position, taken here on the calling thread.
+   *
+   * @param board The root board position.
+   * @param searchDepth The maximum depth for iterative deepening on this search.
+   * @return The futures of the started searches, empty if this engine searches on one thread.
+   */
+  private List<Future<?>> startHelperSearches(final Board board, final int searchDepth) {
+    final List<Future<?>> helpers = new ArrayList<>();
+    for (int helperId = 1; helperId < this.threadCount; helperId++) {
+      final int id = helperId;
+      final Board helperBoard = board.copy();
+      helpers.add(this.searchThreadPool.submit(() -> runHelperSearch(helperBoard, searchDepth, id)));
+    }
+    return helpers;
+  }
+
+  /**
+   * Raises the stop flag and waits for every helper search to unwind.
+   *
+   * @param helpers The futures returned by {@link #startHelperSearches}.
+   */
+  private void stopHelperSearches(final List<Future<?>> helpers) {
+    this.searchStopped = true;
+    for (final Future<?> helper : helpers) {
+      try {
+        helper.get();
+      } catch (final InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      } catch (final ExecutionException e) {
+        System.err.println("Helper search thread failed: " + e.getCause());
+      }
+    }
+  }
+
+  /**
+   * Runs one helper's iterative deepening over its own copy of the position, discarding the moves
+   * it finds. The ladder starts one ply higher for odd numbered helpers so that helpers do not all
+   * repeat the main search, and never runs past the depth the main search was asked for, so no
+   * entry deeper than that depth reaches the transposition table.
+   *
+   * @param board The helper's private copy of the root position.
+   * @param searchDepth The maximum depth for iterative deepening on this search.
+   * @param helperId The helper's number, counted from one.
+   */
+  private void runHelperSearch(final Board board, final int searchDepth, final int helperId) {
+    final long rootHash = board.getZobristHash();
+    Move bestMove = MoveFactory.getNullMove();
+
+    for (int depth = 1 + (helperId % 2); depth <= searchDepth && !searchStopped; depth++) {
+      final SearchStats stats = new SearchStats();
+      this.threadStats.set(stats);
+      try {
+        bestMove = searchRoot(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove).move();
+      } finally {
+        this.boardsEvaluated.addAndGet(stats.boardsEvaluated);
+      }
+    }
+
+    assert board.getZobristHash() == rootHash :
+            "Helper search left its board somewhere other than the root position.";
   }
 
   /**
@@ -457,183 +541,103 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Implements aspiration window search for deeper iterations to reduce search time
-   * by using narrow alpha-beta windows based on previous search results.
+   * Searches the root with a narrow alpha-beta window built from the score of the previous
+   * iteration, and searches it again with a full window if the score falls outside that window.
    *
-   * @param board The root board position.
+   * @param board The board this search thread owns, in the root position.
    * @param depth The current search depth.
    * @param previousBestMove The best move from the previous iteration.
-   * @return The best move found with aspiration window search.
+   * @param previousScore The root score from the previous iteration.
+   * @return The best move found and its score.
    */
-  private Move searchRootAspirationWindow(final Board board, final int depth, final Move previousBestMove) {
-    double alpha = depth > 3 ? highestSeenValue - ASPIRATION_WINDOW : -Double.MAX_VALUE;
-    double beta = depth > 3 ? lowestSeenValue + ASPIRATION_WINDOW : Double.MAX_VALUE;
-    Move bestMove;
+  private RootResult searchRootAspirationWindow(final Board board, final int depth,
+                                                final Move previousBestMove, final double previousScore) {
+    final boolean rootIsWhite = board.currentPlayer().getAlliance().isWhite();
+    final double alpha = (depth > 3 && rootIsWhite) ?
+            previousScore - ASPIRATION_WINDOW : -Double.MAX_VALUE;
+    final double beta = (depth > 3 && !rootIsWhite) ?
+            previousScore + ASPIRATION_WINDOW : Double.MAX_VALUE;
 
-    bestMove = searchRootParallel(board, depth, alpha, beta, previousBestMove);
+    RootResult result = searchRoot(board, depth, alpha, beta, previousBestMove);
 
-    if ((board.currentPlayer().getAlliance().isWhite() && highestSeenValue <= alpha) ||
-            (!board.currentPlayer().getAlliance().isWhite() && lowestSeenValue >= beta)) {
+    if ((rootIsWhite && result.score() <= alpha) || (!rootIsWhite && result.score() >= beta)) {
       System.out.println("Aspiration window failed, re-searching with full window");
-      bestMove = searchRootParallel(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, previousBestMove);
+      result = searchRoot(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, previousBestMove);
     }
 
-    return bestMove;
+    return result;
   }
 
   /**
-   * Searches every legal root move and returns the best one. The root moves are partitioned across
-   * the search threads, and each thread searches the moves it claims to the full depth and writes
-   * any improvement into the shared best move and score. The first move is searched by one thread
-   * alone before the others begin.
+   * Searches every legal root move on the calling thread and returns the best one with its score.
+   * The move that was best in the previous iteration is searched first. A root move that leaves
+   * the mover in check is skipped, and a search that is stopped part way returns the best move
+   * found up to that point.
    *
-   * @param board The root board position.
+   * @param board The board this search thread owns, in the root position. It is left in that
+   *              position when this method returns.
    * @param depth The current search depth.
    * @param alpha The alpha bound for alpha-beta search.
    * @param beta The beta bound for alpha-beta search.
-   * @return The best move found by the parallel search.
+   * @param previousBestMove The best move from the previous iteration, which may be null.
+   * @return The best move found and its score.
    */
-  private Move searchRootParallel(final Board board, final int depth, double alpha, double beta,
-                                  final Move previousBestMove) {
-    final List<Move> allMoves = new ArrayList<>(
+  private RootResult searchRoot(final Board board, final int depth, final double alpha,
+                                final double beta, final Move previousBestMove) {
+    final List<Move> rootMoves = new ArrayList<>(
             MoveSorter.EXPENSIVE.sort(board.currentPlayer().getLegalMoves(), board, this, 0));
 
-    if (allMoves.isEmpty()) {
-      return MoveFactory.getNullMove();
+    if (rootMoves.isEmpty()) {
+      return new RootResult(MoveFactory.getNullMove(), 0);
     }
 
     if (previousBestMove != null && previousBestMove != MoveFactory.getNullMove() &&
-            allMoves.contains(previousBestMove)) {
-      allMoves.remove(previousBestMove);
-      allMoves.add(0, previousBestMove);
+            rootMoves.contains(previousBestMove)) {
+      rootMoves.remove(previousBestMove);
+      rootMoves.add(0, previousBestMove);
     }
 
-    final AtomicReference<Move> globalBestMove = new AtomicReference<>(allMoves.get(0));
-    final AtomicReference<Double> globalBestScore = new AtomicReference<>(
-            board.currentPlayer().getAlliance().isWhite() ? alpha : beta);
+    final boolean rootIsWhite = board.currentPlayer().getAlliance().isWhite();
+    Move bestMove = rootMoves.get(0);
+    double bestScore = rootIsWhite ? alpha : beta;
 
-    final AtomicInteger moveIndex = new AtomicInteger(0);
+    for (final Move move : rootMoves) {
+      if (searchStopped) {
+        break;
+      }
 
-    final CountDownLatch firstMoveLatch = new CountDownLatch(1);
+      board.makeMove(move);
+      if (board.currentPlayer().getOpponent().isInCheck()) {
+        board.unmakeMove();
+        continue;
+      }
 
-    List<Future<?>> futures = new ArrayList<>();
-    for (int threadId = 0; threadId < threadCount; threadId++) {
-      final int id = threadId;
-      futures.add(searchThreadPool.submit(() -> {
-        SearchStats stats = new SearchStats();
-        threadStats.set(stats);
-
-        if (killerMoves.get() == null) {
-          killerMoves.set(new Move[2][MAX_SEARCH_DEPTH]);
-        }
-
-        final Board threadBoard = board.copy();
-        final long rootHash = threadBoard.getZobristHash();
-
-        try {
-          if (id == 0) {
-            try {
-              searchMove(threadBoard, allMoves.get(0), depth,
-                      globalBestMove, globalBestScore, alpha, beta);
-            } finally {
-              firstMoveLatch.countDown();
-            }
-          } else {
-            firstMoveLatch.await();
-          }
-
-          int idx;
-          while ((idx = moveIndex.getAndIncrement()) < allMoves.size() && !searchStopped) {
-            if (idx == 0) continue;
-
-            searchMove(threadBoard, allMoves.get(idx), depth,
-                    globalBestMove, globalBestScore, alpha, beta);
-          }
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-        } finally {
-          boardsEvaluated.addAndGet(stats.boardsEvaluated);
-          assert threadBoard.getZobristHash() == rootHash :
-                  "Thread board not restored to the root position: unbalanced make/unmake.";
-        }
-      }));
-    }
-
-    for (Future<?> future : futures) {
+      double score;
       try {
-        future.get();
-      } catch (Exception e) {
-        System.err.println("Search worker thread failed: " + e);
+        score = rootIsWhite ?
+                min(board, depth - 1, alpha, beta, 1) :
+                max(board, depth - 1, alpha, beta, 1);
+      } finally {
+        board.unmakeMove();
+      }
+
+      if (rootIsWhite ? score > bestScore : score < bestScore) {
+        bestScore = score;
+        bestMove = move;
+        recordCounterMove(board, move);
       }
     }
 
-    if (board.currentPlayer().getAlliance().isWhite()) {
-      highestSeenValue = globalBestScore.get();
-    } else {
-      lowestSeenValue = globalBestScore.get();
-    }
-
-    return globalBestMove.get();
+    return new RootResult(bestMove, bestScore);
   }
 
   /**
-   * Applies the given root move to the calling thread's private board, searches the resulting
-   * position, unmakes the move, and then updates the shared best move and score if this move
-   * improved on them.
-   * <p>
-   * The score comparison and the countermove record deliberately happen after the unmake, because
-   * {@link #recordCounterMove} reads the board's transition move and must see the opponent's
-   * previous move rather than the move just searched.
+   * The move a root search chose and the score it was given.
    *
-   * @param board The calling thread's private board, in the root position.
-   * @param move The root move to search.
-   * @param depth The search depth.
-   * @param bestMove Reference to the current best move.
-   * @param bestScore Reference to the current best score.
-   * @param alpha The alpha bound.
-   * @param beta The beta bound.
+   * @param move The best root move found.
+   * @param score The score of that move.
    */
-  private void searchMove(final Board board, final Move move, final int depth,
-                          final AtomicReference<Move> bestMove, final AtomicReference<Double> bestScore,
-                          final double alpha, final double beta) {
-    final boolean rootIsWhite = board.currentPlayer().getAlliance().isWhite();
-
-    board.makeMove(move);
-    if (board.currentPlayer().getOpponent().isInCheck()) {
-      board.unmakeMove();
-      return;
-    }
-
-    double score;
-    try {
-      score = rootIsWhite ?
-              min(board, depth - 1, alpha, beta, 1) :
-              max(board, depth - 1, alpha, beta, 1);
-    } finally {
-      board.unmakeMove();
-    }
-
-    if (rootIsWhite) {
-      if (score > bestScore.get()) {
-        synchronized (bestScore) {
-          if (score > bestScore.get()) {
-            bestScore.set(score);
-            bestMove.set(move);
-            recordCounterMove(board, move);
-          }
-        }
-      }
-    } else {
-      if (score < bestScore.get()) {
-        synchronized (bestScore) {
-          if (score < bestScore.get()) {
-            bestScore.set(score);
-            bestMove.set(move);
-            recordCounterMove(board, move);
-          }
-        }
-      }
-    }
+  private record RootResult(Move move, double score) {
   }
 
   /**
