@@ -104,9 +104,6 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The starting half-width of the aspiration window at the root. */
   private static final double ASPIRATION_WINDOW = 40;
 
-  /** The half-width past which the aspiration window is abandoned for a full window. */
-  private static final double MAX_ASPIRATION_WINDOW = 320;
-
   /** The material threshold for delta pruning in quiescence search. */
   private static final double DELTA_MATERIAL = 100;
 
@@ -565,25 +562,20 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       return searchRoot(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, previousBestMove);
     }
 
-    double delta = ASPIRATION_WINDOW;
-    double alpha = previousScore - delta;
-    double beta = previousScore + delta;
+    double alpha = previousScore - ASPIRATION_WINDOW;
+    double beta = previousScore + ASPIRATION_WINDOW;
 
-    while (delta <= MAX_ASPIRATION_WINDOW) {
+    for (int attempt = 0; attempt < 2; attempt++) {
       final RootResult result = searchRoot(board, depth, alpha, beta, previousBestMove);
 
       if (this.searchStopped || (result.score() > alpha && result.score() < beta)) {
         return result;
       }
 
-      final boolean failedLow = result.score() <= alpha;
-      System.out.printf("Aspiration %s at depth %d%n", failedLow ? "fail low" : "fail high", depth);
-
-      delta *= 2;
-      if (failedLow) {
-        alpha = previousScore - delta;
+      if (result.score() <= alpha) {
+        alpha = -Double.MAX_VALUE;
       } else {
-        beta = previousScore + delta;
+        beta = Double.MAX_VALUE;
       }
     }
 
