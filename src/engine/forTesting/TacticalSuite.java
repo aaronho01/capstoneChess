@@ -295,14 +295,14 @@ public class TacticalSuite {
       return abandoned(position, "the position could not be parsed: " + exception.getMessage());
     }
     final long startTime = System.nanoTime();
-    final Move chosenMove = search(board, depth);
+    final SearchOutcome outcome = search(board, depth);
     final double elapsedSeconds = (System.nanoTime() - startTime) / NANOSECONDS_PER_SECOND;
-    final String chosenNotation = describe(board, chosenMove);
+    final String chosenNotation = describe(board, outcome.move());
     final boolean solved = position.accepts(chosenNotation);
-    final String report = String.format("%s%n  %s%n  depth %d  expected %-14s chose %-14s %8.2fs  %s%n%n",
+    final String report = String.format("%s%n  %s%n  depth %d  expected %-14s chose %-14s %10.0f %8.2fs  %s%n%n",
             position.name(), position.fen(), depth,
-            String.join(" or ", position.acceptedMoves()), chosenNotation, elapsedSeconds,
-            solved ? "PASS" : "FAIL");
+            String.join(" or ", position.acceptedMoves()), chosenNotation, outcome.score(),
+            elapsedSeconds, solved ? "PASS" : "FAIL");
     return new PositionOutcome(solved, report);
   }
 
@@ -315,13 +315,23 @@ public class TacticalSuite {
    * @param depth The depth to search to.
    * @return The move the engine chose.
    */
-  private static Move search(final Board board, final int depth) {
+  private static SearchOutcome search(final Board board, final int depth) {
     final AlphaBeta engine = new AlphaBeta(depth, TABLE_SIZE_MB, SEARCH_THREADS);
     try {
-      return engine.execute(board, depth);
+      final Move move = engine.execute(board, depth);
+      return new SearchOutcome(move, engine.getLastScore());
     } finally {
       engine.shutdown();
     }
+  }
+
+  /**
+   * The move a search chose and the score it was given.
+   *
+   * @param move The move the engine chose.
+   * @param score The root score of that move.
+   */
+  private record SearchOutcome(Move move, double score) {
   }
 
   /**

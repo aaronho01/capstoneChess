@@ -45,6 +45,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The count of boards evaluated during the search process. */
   private final AtomicLong boardsEvaluated = new AtomicLong(0);
 
+  /** The root score of the most recent search, from White's point of view. */
+  private volatile double lastScore;
+
   /** Thread-local search statistics for tracking per-thread performance metrics. */
   private final ThreadLocal<SearchStats> threadStats = new ThreadLocal<>();
 
@@ -458,6 +461,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     assert mainBoard.getZobristHash() == rootHash :
             "The main search left its board somewhere other than the root position.";
 
+    this.lastScore = bestScore;
+
     return bestMove;
   }
 
@@ -533,6 +538,15 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   public void shutdown() {
     this.searchStopped = true;
     this.searchThreadPool.shutdown();
+  }
+
+  /**
+   * Returns the root score of the most recent search, from White's point of view.
+   *
+   * @return The score of the move the last search returned.
+   */
+  public double getLastScore() {
+    return this.lastScore;
   }
 
   /**
