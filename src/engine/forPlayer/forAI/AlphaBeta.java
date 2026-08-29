@@ -573,7 +573,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
   /**
    * Searches every legal root move on the calling thread and returns the best one with its score.
-   * The move that was best in the previous iteration is searched first. A root move that leaves
+   * The move that was best in the previous iteration is searched first, and each move is searched
+   * against a window narrowed to the best score found so far. A root move that leaves
    * the mover in check is skipped, and a search that is stopped part way returns the best move
    * found up to that point.
    *
@@ -618,8 +619,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       double score;
       try {
         score = rootIsWhite ?
-                min(board, depth - 1, alpha, beta, 1) :
-                max(board, depth - 1, alpha, beta, 1);
+                min(board, depth - 1, bestScore, beta, 1) :
+                max(board, depth - 1, alpha, bestScore, 1);
       } finally {
         board.unmakeMove();
       }
