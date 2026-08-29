@@ -724,6 +724,23 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
+   * Stores an entry in the transposition table unless the search has been stopped. A score
+   * produced after the stop flag is raised is not the result of a completed search.
+   *
+   * @param zobristHash The Zobrist hash of the board position.
+   * @param score The score to store, already converted by {@link #scoreToTable}.
+   * @param depth The search depth the score was produced at.
+   * @param nodeType The type of node (exact, lower bound, upper bound).
+   * @param bestMove The best move found at this node, or null.
+   */
+  private void storeIfSearching(final long zobristHash, final double score, final int depth,
+                                final byte nodeType, final Move bestMove) {
+    if (!searchStopped) {
+      transpositionTable.store(zobristHash, score, depth, nodeType, bestMove);
+    }
+  }
+
+  /**
    * Implements the maximizing player portion of the alpha-beta search algorithm
    * with various pruning techniques and search extensions.
    *
@@ -887,7 +904,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
           }
 
-          transpositionTable.store(zobristHash, scoreToTable(beta, ply), depth,
+          storeIfSearching(zobristHash, scoreToTable(beta, ply), depth,
                   TranspositionTable.LOWERBOUND, bestFoundMove);
           return beta;
         }
@@ -903,7 +920,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (currentAlpha >= beta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, scoreToTable(currentAlpha, ply), depth, nodeType, bestFoundMove);
+    storeIfSearching(zobristHash, scoreToTable(currentAlpha, ply), depth, nodeType, bestFoundMove);
 
     return currentAlpha;
   }
@@ -1071,7 +1088,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
           }
 
-          transpositionTable.store(zobristHash, scoreToTable(alpha, ply), depth,
+          storeIfSearching(zobristHash, scoreToTable(alpha, ply), depth,
                   TranspositionTable.UPPERBOUND, bestFoundMove);
           return alpha;
         }
@@ -1087,7 +1104,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (currentBeta >= beta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, scoreToTable(currentBeta, ply), depth, nodeType, bestFoundMove);
+    storeIfSearching(zobristHash, scoreToTable(currentBeta, ply), depth, nodeType, bestFoundMove);
 
     return currentBeta;
   }
@@ -1214,7 +1231,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
 
       if (alpha >= beta) {
-        transpositionTable.store(zobristHash, scoreToTable(maximizing ? beta : alpha, ply), 0,
+        storeIfSearching(zobristHash, scoreToTable(maximizing ? beta : alpha, ply), 0,
                 maximizing ? TranspositionTable.LOWERBOUND : TranspositionTable.UPPERBOUND, null);
         return maximizing ? beta : alpha;
       }
@@ -1227,7 +1244,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     } else if (finalScore >= originalBeta) {
       nodeType = TranspositionTable.LOWERBOUND;
     }
-    transpositionTable.store(zobristHash, scoreToTable(finalScore, ply), 0, nodeType, null);
+    storeIfSearching(zobristHash, scoreToTable(finalScore, ply), 0, nodeType, null);
     return finalScore;
   }
 
