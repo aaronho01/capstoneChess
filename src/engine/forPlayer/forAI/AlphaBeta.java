@@ -101,8 +101,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The evaluation margin for razoring pruning technique. */
   private static final double RAZOR_MARGIN = 150;
 
-  /** The size of the aspiration window for aspiration search. */
+  /** The starting half-width of the aspiration window at the root. */
   private static final double ASPIRATION_WINDOW = 40;
+
+  /** The half-width past which the aspiration window is abandoned for a full window. */
+  private static final double MAX_ASPIRATION_WINDOW = 320;
 
   /** The material threshold for delta pruning in quiescence search. */
   private static final double DELTA_MATERIAL = 100;
@@ -416,7 +419,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
         RootResult result;
         try {
-          result = currentDepth >= 3 ?
+          result = currentDepth >= 4 ?
                   searchRootAspirationWindow(mainBoard, currentDepth, bestMove, bestScore) :
                   searchRoot(mainBoard, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
         } finally {
@@ -544,8 +547,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Searches the root with a narrow alpha-beta window built from the score of the previous
-   * iteration, and searches it again with a full window if the score falls outside that window.
+   * Searches the root with a narrow window centered on the score of the previous iteration. A
+   * search whose score reaches or passes a bound is discarded and repeated with that bound moved
+   * out and the window doubled, until the score lands strictly inside the window or the window
+   * grows past {@link #MAX_ASPIRATION_WINDOW} and a full window is used. A checkmate score from
+   * the previous iteration is never narrowed.
    *
    * @param board The board this search thread owns, in the root position.
    * @param depth The current search depth.
@@ -555,20 +561,33 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    */
   private RootResult searchRootAspirationWindow(final Board board, final int depth,
                                                 final Move previousBestMove, final double previousScore) {
-    final boolean rootIsWhite = board.currentPlayer().getAlliance().isWhite();
-    final double alpha = (depth > 3 && rootIsWhite) ?
-            previousScore - ASPIRATION_WINDOW : -Double.MAX_VALUE;
-    final double beta = (depth > 3 && !rootIsWhite) ?
-            previousScore + ASPIRATION_WINDOW : Double.MAX_VALUE;
-
-    RootResult result = searchRoot(board, depth, alpha, beta, previousBestMove);
-
-    if ((rootIsWhite && result.score() <= alpha) || (!rootIsWhite && result.score() >= beta)) {
-      System.out.println("Aspiration window failed, re-searching with full window");
-      result = searchRoot(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, previousBestMove);
+    if (Math.abs(previousScore) >= MATE_THRESHOLD) {
+      return searchRoot(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, previousBestMove);
     }
 
-    return result;
+    double delta = ASPIRATION_WINDOW;
+    double alpha = previousScore - delta;
+    double beta = previousScore + delta;
+
+    while (delta <= MAX_ASPIRATION_WINDOW) {
+      final RootResult result = searchRoot(board, depth, alpha, beta, previousBestMove);
+
+      if (this.searchStopped || (result.score() > alpha && result.score() < beta)) {
+        return result;
+      }
+
+      final boolean failedLow = result.score() <= alpha;
+      System.out.printf("Aspiration %s at depth %d%n", failedLow ? "fail low" : "fail high", depth);
+
+      delta *= 2;
+      if (failedLow) {
+        alpha = previousScore - delta;
+      } else {
+        beta = previousScore + delta;
+      }
+    }
+
+    return searchRoot(board, depth, -Double.MAX_VALUE, Double.MAX_VALUE, previousBestMove);
   }
 
   /**
