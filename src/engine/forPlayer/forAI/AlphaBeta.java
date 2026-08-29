@@ -482,8 +482,10 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
-   * Searches the root position using parallel Lazy SMP search with Young Brothers Wait protocol.
-   * Distributes move searching across multiple threads for improved performance.
+   * Searches every legal root move and returns the best one. The root moves are partitioned across
+   * the search threads, and each thread searches the moves it claims to the full depth and writes
+   * any improvement into the shared best move and score. The first move is searched by one thread
+   * alone before the others begin.
    *
    * @param board The root board position.
    * @param depth The current search depth.
@@ -544,10 +546,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           while ((idx = moveIndex.getAndIncrement()) < allMoves.size() && !searchStopped) {
             if (idx == 0) continue;
 
-            int threadDepth = depth - (id % 2);
-            if (threadDepth < 1) threadDepth = 1;
-
-            searchMove(threadBoard, allMoves.get(idx), threadDepth,
+            searchMove(threadBoard, allMoves.get(idx), depth,
                     globalBestMove, globalBestScore, alpha, beta);
           }
         } catch (InterruptedException e) {
@@ -1362,21 +1361,37 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       try {
         TranspositionTable.Entry entry = table[index];
         if (entry.key == zobristHash && entry.key != 0) {
-          entry.age = currentAge;
-          return entry;
+          return copyOf(entry);
         }
 
-        int index2 = (index ^ (int)(zobristHash >>> 32)) & mask;
+        int index2 = (index ^ (int) (zobristHash >>> 32)) & mask;
         TranspositionTable.Entry entry2 = table[index2];
         if (entry2.key == zobristHash && entry2.key != 0) {
-          entry2.age = currentAge;
-          return entry2;
+          return copyOf(entry2);
         }
 
         return null;
       } finally {
         lock.readLock().unlock();
       }
+    }
+
+    /**
+     * Returns a copy of the given entry. Probing threads receive copies, because storing threads
+     * reuse the table's entries in place.
+     *
+     * @param entry The entry to copy.
+     * @return A new entry holding the same values.
+     */
+    private static TranspositionTable.Entry copyOf(final TranspositionTable.Entry entry) {
+      TranspositionTable.Entry copy = new TranspositionTable.Entry();
+      copy.key = entry.key;
+      copy.score = entry.score;
+      copy.depth = entry.depth;
+      copy.nodeType = entry.nodeType;
+      copy.age = entry.age;
+      copy.move = entry.move;
+      return copy;
     }
 
     /**

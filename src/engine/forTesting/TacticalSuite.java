@@ -46,7 +46,7 @@ public class TacticalSuite {
    * The number of search threads given to each engine. This is one so that a run is reproducible:
    * a parallel search reaches different results on different runs of the same position.
    */
-  private static final int SEARCH_THREADS = 1;
+  private static final int SEARCH_THREADS = 4;
 
   /**
    * The number of positions searched at once when no worker count is given. Each worker holds a
