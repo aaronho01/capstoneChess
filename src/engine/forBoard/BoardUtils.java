@@ -138,11 +138,12 @@ public enum BoardUtils {
   }
 
   /**
-   * Returns whether the position is drawn by threefold repetition or by the fifty-move rule.
+   * Returns whether the position is drawn by threefold repetition, by the fifty-move rule, or by
+   * insufficient material.
    * <p>
-   * Both are claims rather than automatic draws under the FIDE rules, but this engine gives a
-   * player no way to claim one, and a game that cannot end is worse than a game that ends a little
-   * early, so both are treated as automatic here.
+   * Repetition and the fifty-move rule are claims rather than automatic draws under the FIDE
+   * rules, but this engine gives a player no way to claim one, and a game that cannot end is worse
+   * than a game that ends a little early, so both are treated as automatic here.
    * <p>
    * Deliberately kept out of {@link #isEndOfGame(Board)}. Repetition is a property of the path
    * taken to a position rather than of the position itself, so a search that treated it as
@@ -150,10 +151,12 @@ public enum BoardUtils {
    * method is for the game being played, not for the search.
    *
    * @param board The current state of the board.
-   * @return True if the position is drawn by repetition or the fifty-move rule.
+   * @return True if the position is drawn by repetition, the fifty-move rule, or insufficient
+   *         material.
    */
   public static boolean isDrawnPosition(final Board board) {
-    return board.isThreefoldRepetition() || board.isFiftyMoveRule();
+    return board.isThreefoldRepetition() || board.isFiftyMoveRule() ||
+            board.isInsufficientMaterial();
   }
 
   /**

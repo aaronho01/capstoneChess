@@ -262,6 +262,37 @@ public final class Board {
   }
 
   /**
+   * Returns whether the material left on the board makes checkmate impossible for both sides. A
+   * king and two knights against a bare king is not included, since mate there is still legally
+   * reachable.
+   *
+   * @return True if neither side can deliver checkmate.
+   */
+  public boolean isInsufficientMaterial() {
+    int knightCount = 0;
+    int bishopCount = 0;
+    int bishopSquareColors = 0;
+    for (final Piece piece : getAllPieces()) {
+      switch (piece.getPieceType()) {
+        case PAWN, ROOK, QUEEN -> {
+          return false;
+        }
+        case KNIGHT -> knightCount++;
+        case BISHOP -> {
+          bishopCount++;
+          final int position = piece.getPiecePosition();
+          bishopSquareColors |= 1 << (((position / 8) + (position % 8)) % 2);
+        }
+        default -> { }
+      }
+    }
+    if (knightCount == 0) {
+      return bishopSquareColors != 3;
+    }
+    return knightCount == 1 && bishopCount == 0;
+  }
+
+  /**
    * Retrieves the white player controlling the white pieces.
    *
    * @return The white player.
