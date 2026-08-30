@@ -241,7 +241,8 @@ public class UciEngine {
    * node limit searches to a fixed ceiling until the limit is reached, one naming a depth searches
    * to that depth without a node limit, and one naming neither uses the default node limit. A
    * search that returns no move is reported as the null move with no score, which is what a
-   * terminal position produces.
+   * terminal position produces. A score holding a checkmate is reported as a distance to mate
+   * rather than in centipawns.
    *
    * @param tokens The whitespace separated tokens of the command.
    * @throws IllegalArgumentException If a limit is not a number.
@@ -266,9 +267,28 @@ public class UciEngine {
       final double score = engine().getLastScore();
       final double relativeScore =
               this.board.currentPlayer().getAlliance().isWhite() ? score : -score;
-      this.protocol.println("info score cp " + Math.round(relativeScore));
+      this.protocol.println("info score " + scoreOf(relativeScore));
     }
     this.protocol.println("bestmove " + notation);
+  }
+
+  /**
+   * Renders a root score as the score field of a protocol line. A score at or beyond the mate
+   * threshold is reported as the number of moves to the mate, positive when the side to move
+   * delivers it and negative when the side to move is mated. Any other score is reported in
+   * centipawns.
+   *
+   * @param relativeScore The root score from the point of view of the side to move.
+   * @return The score field, holding either a distance to mate or a score in centipawns.
+   */
+  private static String scoreOf(final double relativeScore) {
+    final double magnitude = Math.abs(relativeScore);
+    if (magnitude < AlphaBeta.MATE_THRESHOLD) {
+      return "cp " + Math.round(relativeScore);
+    }
+    final long plies = Math.round(AlphaBeta.MATE_VALUE - magnitude);
+    final long moves = (plies + 1) / 2;
+    return "mate " + (relativeScore < 0 ? -moves : moves);
   }
 
   /**

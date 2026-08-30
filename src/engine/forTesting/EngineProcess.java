@@ -44,8 +44,11 @@ public class EngineProcess implements AutoCloseable {
   /** The time a process is given to exit before a fault reports it as still running. */
   private static final long EXIT_GRACE_MILLIS = 500;
 
-  /** The prefix of the protocol line reporting a score. */
-  private static final String SCORE_PREFIX = "info score cp ";
+  /** The prefix of the protocol line reporting a score in centipawns. */
+  private static final String CENTIPAWN_SCORE_PREFIX = "info score cp ";
+
+  /** The prefix of the protocol line reporting a score as a distance to mate. */
+  private static final String MATE_SCORE_PREFIX = "info score mate ";
 
   /** The name used for this engine in fault messages. */
   private final String name;
@@ -174,17 +177,22 @@ public class EngineProcess implements AutoCloseable {
     final long start = System.nanoTime();
     send("go nodes " + nodeLimit);
     Integer score = null;
+    Integer mateIn = null;
     while (true) {
       final String line = readLine("bestmove");
-      if (line.startsWith(SCORE_PREFIX)) {
-        score = readScore(line);
+      if (line.startsWith(CENTIPAWN_SCORE_PREFIX)) {
+        score = readNumber(line, CENTIPAWN_SCORE_PREFIX);
+        mateIn = null;
+      } else if (line.startsWith(MATE_SCORE_PREFIX)) {
+        mateIn = readNumber(line, MATE_SCORE_PREFIX);
+        score = null;
       } else if (line.startsWith("bestmove")) {
         final String[] tokens = line.split("\\s+");
         if (tokens.length < 2) {
           throw new Fault(this.name, "reported a move command with no move: " + line);
         }
         final long elapsed = (System.nanoTime() - start) / 1_000_000L;
-        return new Reply(tokens[1], score, elapsed);
+        return new Reply(tokens[1], score, mateIn, elapsed);
       }
     }
   }
@@ -356,14 +364,15 @@ public class EngineProcess implements AutoCloseable {
   }
 
   /**
-   * Reads the score a score line reports.
+   * Reads the number a score line reports.
    *
    * @param line The protocol line reporting the score.
-   * @return The score in centipawns, or null if the line does not hold a number.
+   * @param prefix The prefix of the line, which the number follows.
+   * @return The number the line holds, or null if it does not hold one.
    */
-  private static Integer readScore(final String line) {
+  private static Integer readNumber(final String line, final String prefix) {
     try {
-      return Integer.valueOf(line.substring(SCORE_PREFIX.length()).trim());
+      return Integer.valueOf(line.substring(prefix.length()).trim());
     } catch (final NumberFormatException exception) {
       return null;
     }
@@ -413,13 +422,18 @@ public class EngineProcess implements AutoCloseable {
   }
 
   /**
-   * The Reply record holds what one search command returned.
+   * The Reply record holds what one search command returned. At most one of the score and the
+   * distance to mate is held, since a search reports a position as either an evaluation or a mate.
    *
    * @param move The move the engine chose, in long algebraic notation.
-   * @param score The score the engine reported in centipawns, or null if it reported none.
+   * @param score The score the engine reported in centipawns, or null if it reported a mate or
+   *              reported nothing.
+   * @param mateIn The number of moves to the mate the engine reported, positive when the engine
+   *               delivers the mate and negative when it is mated, or null if it reported a score
+   *               in centipawns or reported nothing.
    * @param elapsedMillis The time the search took, in milliseconds.
    */
-  public record Reply(String move, Integer score, long elapsedMillis) {
+  public record Reply(String move, Integer score, Integer mateIn, long elapsedMillis) {
   }
 
   /**

@@ -117,10 +117,10 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private static final int SEE_PRUNING_THRESHOLD = -20;
 
   /** The score of a checkmate delivered at the root, reduced by one for each ply to the mate. */
-  private static final double MATE_VALUE = 1000000;
+  public static final double MATE_VALUE = 1000000;
 
   /** The lowest magnitude at which a score is a checkmate score rather than an evaluation. */
-  private static final double MATE_THRESHOLD = MATE_VALUE - MAX_SEARCH_DEPTH;
+  public static final double MATE_THRESHOLD = MATE_VALUE - MAX_SEARCH_DEPTH;
 
   /** Reference to the static exchange evaluator for move evaluation. */
   private final StaticExchangeEvaluator seeEvaluator = StaticExchangeEvaluator.get();

@@ -434,7 +434,24 @@ public class SelfPlayMatch {
   private static void printMove(final int ply, final boolean whiteMoved,
                                 final EngineProcess.Reply reply) {
     System.out.printf("%6d  %s  %-6s  %9s  %7.2fs%n", ply, whiteMoved ? "W" : "B", reply.move(),
-            reply.score() == null ? "-" : "cp " + reply.score(), reply.elapsedMillis() / 1000.0);
+            scoreText(reply), reply.elapsedMillis() / 1000.0);
+  }
+
+  /**
+   * Names what an engine reported about the position it moved from.
+   *
+   * @param reply What the engine reported.
+   * @return The distance to mate, the score in centipawns, or a dash if the engine reported
+   *         neither.
+   */
+  private static String scoreText(final EngineProcess.Reply reply) {
+    if (reply.mateIn() != null) {
+      return "mate " + reply.mateIn();
+    }
+    if (reply.score() != null) {
+      return "cp " + reply.score();
+    }
+    return "-";
   }
 
   /**
