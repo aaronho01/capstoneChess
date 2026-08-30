@@ -199,6 +199,15 @@ public class EngineProcess implements AutoCloseable {
   }
 
   /**
+   * Returns the name this engine is reported under.
+   *
+   * @return The name given when this engine was started.
+   */
+  public String getName() {
+    return this.name;
+  }
+
+  /**
    * Returns the command line this engine was started from.
    *
    * @return The command line, already split into its arguments.

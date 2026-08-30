@@ -6,13 +6,24 @@ import engine.forBoard.Move;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 
 /**
- * The SelfPlayMatch class plays one game between two chess engines running as separate processes
+ * The SelfPlayMatch class plays a match between two chess engines running as separate processes
  * and reports the result. It is the arbiter as well as the runner: it holds the only board that
  * counts, decides the outcome, and accepts a move only after resolving it against its own legal
  * moves, so an engine cannot end a game by claiming one.
+ * <p>
+ * Every opening is played twice, once with each engine as White, which is what a pair is. Both
+ * engines are started once for the whole match and reused, and a new game is started on each of
+ * them before every game, so the transposition table and the heuristic tables an engine holds
+ * never carry from one game into the next.
+ * <p>
+ * Openings are drawn from a shuffle of the book seeded from the command line, since the book is
+ * grouped by opening classification and taking its lines in order would play a match out of one
+ * corner of it. The same seed draws the same openings, so a match can be repeated.
  * <p>
  * Both engines are told the position as the standard starting position followed by every move
  * played so far, including the moves of the opening, rather than as a position in
@@ -46,13 +57,28 @@ public class SelfPlayMatch {
   /** The directory the engine logs are written to when no other directory is given. */
   private static final String DEFAULT_LOG_DIRECTORY = "out/match-logs";
 
+  /** The number of openings played when no other number is given. */
+  private static final int DEFAULT_PAIRS = 1;
+
+  /** The seed the book shuffle uses when no other seed is given. */
+  private static final long DEFAULT_SEED = 1;
+
+  /** The number of games played from each opening, one with each engine as White. */
+  private static final int GAMES_PER_PAIR = 2;
+
   /** The search thread count both engines are held to. */
   private static final int SEARCH_THREADS = 1;
 
   /** The long algebraic notation an engine reports when it has no move to make. */
   private static final String NULL_MOVE_NOTATION = "0000";
 
-  /** The exit status used when the game ended in a failure rather than a result. */
+  /** The name the first engine is reported and logged under. */
+  private static final String ENGINE_A_NAME = "A";
+
+  /** The name the second engine is reported and logged under. */
+  private static final String ENGINE_B_NAME = "B";
+
+  /** The exit status used when the match stopped in a failure rather than reaching its end. */
   private static final int FAILURE_STATUS = 1;
 
   /** The exit status used when the command line could not be read. */
@@ -68,9 +94,9 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Plays one game from the command line and reports the result. The exit status is zero if the
-   * game reached a result, one if it ended in a failure, and two if the command line could not be
-   * read.
+   * Plays a match from the command line and reports the result. The exit status is zero if every
+   * game reached a result, one if the match stopped on a failure, and two if the command line or
+   * the opening book could not be read.
    *
    * @param args The command line arguments, as described by the usage text.
    */
@@ -89,9 +115,9 @@ public class SelfPlayMatch {
       return;
     }
 
-    final OpeningBook.Opening opening;
+    final List<BookLine> lines;
     try {
-      opening = openingOf(settings);
+      lines = selectLines(settings);
     } catch (final IOException exception) {
       System.out.println("The opening book at " + settings.bookPath() + " could not be read: " +
               exception.getMessage());
@@ -103,42 +129,96 @@ public class SelfPlayMatch {
       return;
     }
 
-    printHeader(settings, opening);
-    final Result result = play(settings, opening);
-    System.out.println();
-    System.out.println("Result: " + result.outcome() + ", " + result.reason());
-    System.out.println("Plies: " + result.moves().size());
-    System.out.println("Moves: " + String.join(" ", result.moves()));
-    if (result.outcome() == Outcome.FAILURE) {
+    printHeader(settings, lines);
+    final Tally tally = runMatch(settings, lines);
+    printTally(tally, lines.size());
+    if (tally.failure() != null) {
+      System.out.println();
+      System.out.println("The match stopped: " + tally.failure());
       System.exit(FAILURE_STATUS);
     }
   }
 
   /**
-   * Plays one game between two engine processes.
+   * Plays every pair of the match on one pair of engine processes, reporting each game as it ends.
+   * The match stops at the first failure, and the games played before it are still counted.
+   *
+   * @param settings The settings the match is played under.
+   * @param lines The openings the match is played from, each of them played twice.
+   * @return What the games came to and what stopped the match, if anything did.
+   */
+  private static Tally runMatch(final Settings settings, final List<BookLine> lines) {
+    final List<String> commandA;
+    final List<String> commandB;
+    try {
+      commandA = EngineProcess.tokenize(settings.engineACommand());
+      commandB = EngineProcess.tokenize(settings.engineBCommand());
+    } catch (final IllegalArgumentException exception) {
+      return new Tally(0, 0, 0, 0, exception.getMessage());
+    }
+
+    final Path logDirectory = Path.of(settings.logDirectory());
+    final long timeoutMillis = settings.timeoutSeconds() * 1_000L;
+    int engineAWins = 0;
+    int engineBWins = 0;
+    int draws = 0;
+    int played = 0;
+
+    try (EngineProcess engineA = new EngineProcess(ENGINE_A_NAME, commandA,
+            logDirectory.resolve("engine-a.log"), timeoutMillis);
+         EngineProcess engineB = new EngineProcess(ENGINE_B_NAME, commandB,
+                 logDirectory.resolve("engine-b.log"), timeoutMillis)) {
+      prepare(engineA, settings);
+      prepare(engineB, settings);
+
+      for (int pair = 0; pair < lines.size(); pair++) {
+        final BookLine line = lines.get(pair);
+        printPair(pair + 1, line);
+        for (int game = 0; game < GAMES_PER_PAIR; game++) {
+          final boolean engineAIsWhite = game == 0;
+          final EngineProcess white = engineAIsWhite ? engineA : engineB;
+          final EngineProcess black = engineAIsWhite ? engineB : engineA;
+          final Result result = play(settings, line.opening(), white, black);
+          printGame(game + 1, engineAIsWhite, result, settings.verbose());
+          if (result.outcome() == Outcome.FAILURE) {
+            return new Tally(engineAWins, engineBWins, draws, played, result.reason());
+          }
+          played++;
+          if (result.outcome() == Outcome.DRAW) {
+            draws++;
+          } else if ((result.outcome() == Outcome.WHITE_WINS) == engineAIsWhite) {
+            engineAWins++;
+          } else {
+            engineBWins++;
+          }
+        }
+      }
+    } catch (final EngineProcess.Fault fault) {
+      return new Tally(engineAWins, engineBWins, draws, played, fault.getMessage());
+    }
+    return new Tally(engineAWins, engineBWins, draws, played, null);
+  }
+
+  /**
+   * Plays one game between two engine processes, starting a new game on each of them first.
    *
    * @param settings The settings the game is played under.
    * @param opening The opening the game starts from, or null to start from the standard starting
    *                position.
+   * @param white The engine playing White.
+   * @param black The engine playing Black.
    * @return The outcome of the game, why it ended, and the moves it held.
    */
-  public static Result play(final Settings settings, final OpeningBook.Opening opening) {
-    final Path logDirectory = Path.of(settings.logDirectory());
-    final long timeoutMillis = settings.timeoutSeconds() * 1_000L;
+  public static Result play(final Settings settings, final OpeningBook.Opening opening,
+                            final EngineProcess white, final EngineProcess black) {
     final List<String> moves = new ArrayList<>();
     final Board board = opening == null ? Board.createStandardBoard() : OpeningBook.play(opening);
     if (opening != null) {
       moves.addAll(opening.moves());
     }
-
-    try (EngineProcess white = new EngineProcess("white",
-            EngineProcess.tokenize(settings.whiteCommand()), logDirectory.resolve("white.log"),
-            timeoutMillis);
-         EngineProcess black = new EngineProcess("black",
-                 EngineProcess.tokenize(settings.blackCommand()), logDirectory.resolve("black.log"),
-                 timeoutMillis)) {
-      prepare(white, settings);
-      prepare(black, settings);
+    try {
+      white.newGame();
+      black.newGame();
       return playMoves(settings, board, moves, white, black);
     } catch (final EngineProcess.Fault fault) {
       return new Result(Outcome.FAILURE, fault.getMessage(), moves);
@@ -146,21 +226,21 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Carries out the handshake with one engine, sets its options, and starts a new game on it.
+   * Carries out the handshake with one engine and sets its options. The engine reads the options
+   * when a new game is started, so this is done once for the match.
    *
    * @param engine The engine to prepare.
-   * @param settings The settings the game is played under.
+   * @param settings The settings the match is played under.
    * @throws EngineProcess.Fault If the engine does not answer.
    */
   private static void prepare(final EngineProcess engine, final Settings settings) {
     engine.handshake();
     engine.setOption("Hash", settings.tableSizeMB());
     engine.setOption("Threads", SEARCH_THREADS);
-    engine.newGame();
   }
 
   /**
-   * Plays moves until the game reaches a result or fails, reporting each move as it is played.
+   * Plays moves until the game reaches a result or fails.
    *
    * @param settings The settings the game is played under.
    * @param board The position the game is played on, which this method advances.
@@ -185,20 +265,24 @@ public class SelfPlayMatch {
 
       final boolean whiteToMove = board.currentPlayer().getAlliance().isWhite();
       final EngineProcess mover = whiteToMove ? white : black;
+      final String moverName = "the " + mover.getName() + " engine, playing " +
+              (whiteToMove ? "White" : "Black") + ",";
       mover.setPosition(moves);
       final EngineProcess.Reply reply = mover.go(settings.nodeLimit());
       if (NULL_MOVE_NOTATION.equals(reply.move())) {
-        return new Result(Outcome.FAILURE, "the " + (whiteToMove ? "white" : "black") +
-                " engine reported no move in a position the arbiter did not find terminal", moves);
+        return new Result(Outcome.FAILURE, moverName + " reported no move in a position the " +
+                "arbiter did not find terminal", moves);
       }
       final Move move = OpeningBook.resolve(board, reply.move());
       if (move == null) {
-        return new Result(Outcome.FAILURE, "the " + (whiteToMove ? "white" : "black") +
-                " engine reported the illegal move " + reply.move(), moves);
+        return new Result(Outcome.FAILURE, moverName + " reported the illegal move " +
+                reply.move(), moves);
       }
       board.makeMove(move);
       moves.add(reply.move());
-      printMove(moves.size(), whiteToMove, reply);
+      if (settings.verbose()) {
+        printMove(moves.size(), whiteToMove, reply);
+      }
     }
   }
 
@@ -232,44 +316,112 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Reads the opening the settings name.
+   * Chooses the openings the match is played from. Without a book every pair starts from the
+   * standard starting position, a named line is the only line played, and otherwise the lines are
+   * drawn from a shuffle of the book seeded from the settings.
    *
-   * @param settings The settings the game is played under.
-   * @return The opening the game starts from, or null if the settings name none.
+   * @param settings The settings the match is played under.
+   * @return The openings the match is played from, one for each pair.
    * @throws IOException If the book file cannot be read.
-   * @throws IllegalArgumentException If the book holds no opening at the given index.
+   * @throws IllegalArgumentException If the book holds no openings, holds no line at the named
+   *                                  index, or holds fewer lines than the match asks for.
    */
-  private static OpeningBook.Opening openingOf(final Settings settings) throws IOException {
-    if (settings.openingIndex() < 0) {
-      return null;
+  private static List<BookLine> selectLines(final Settings settings) throws IOException {
+    final List<BookLine> lines = new ArrayList<>();
+    if (!settings.useBook()) {
+      for (int pair = 0; pair < settings.pairs(); pair++) {
+        lines.add(new BookLine(-1, null));
+      }
+      return lines;
     }
-    final List<OpeningBook.Opening> openings = OpeningBook.load(Path.of(settings.bookPath()));
-    if (settings.openingIndex() >= openings.size()) {
-      throw new IllegalArgumentException("The book holds " + openings.size() +
-              " openings, so there is none at index " + settings.openingIndex());
+
+    final List<OpeningBook.Opening> book = OpeningBook.load(Path.of(settings.bookPath()));
+    if (book.isEmpty()) {
+      throw new IllegalArgumentException("The book at " + settings.bookPath() +
+              " holds no openings");
     }
-    return openings.get(settings.openingIndex());
+    if (settings.openingIndex() >= 0) {
+      if (settings.openingIndex() >= book.size()) {
+        throw new IllegalArgumentException("The book holds " + book.size() +
+                " openings, so there is none at index " + settings.openingIndex());
+      }
+      lines.add(new BookLine(settings.openingIndex(), book.get(settings.openingIndex())));
+      return lines;
+    }
+    if (settings.pairs() > book.size()) {
+      throw new IllegalArgumentException("The book holds " + book.size() + " openings, so " +
+              settings.pairs() + " pairs cannot be played without repeating one");
+    }
+
+    final List<Integer> order = new ArrayList<>(book.size());
+    for (int index = 0; index < book.size(); index++) {
+      order.add(index);
+    }
+    Collections.shuffle(order, new Random(settings.seed()));
+    for (int pair = 0; pair < settings.pairs(); pair++) {
+      final int index = order.get(pair);
+      lines.add(new BookLine(index, book.get(index)));
+    }
+    return lines;
   }
 
   /**
-   * Reports the settings the game is played under.
+   * Reports the settings the match is played under.
    *
-   * @param settings The settings the game is played under.
-   * @param opening The opening the game starts from, or null if it starts from the standard
-   *                starting position.
+   * @param settings The settings the match is played under.
+   * @param lines The openings the match is played from.
    */
-  private static void printHeader(final Settings settings, final OpeningBook.Opening opening) {
-    System.out.println("White: " + settings.whiteCommand());
-    System.out.println("Black: " + settings.blackCommand());
+  private static void printHeader(final Settings settings, final List<BookLine> lines) {
+    System.out.println("Engine A: " + settings.engineACommand());
+    System.out.println("Engine B: " + settings.engineBCommand());
     System.out.println("Nodes: " + settings.nodeLimit() + " per move, hash " +
             settings.tableSizeMB() + " MB, " + SEARCH_THREADS + " search thread");
-    if (opening == null) {
-      System.out.println("Opening: the standard starting position");
+    if (!settings.useBook()) {
+      System.out.println("Openings: the standard starting position");
+    } else if (settings.openingIndex() >= 0) {
+      System.out.println("Openings: line " + settings.openingIndex() + " of " +
+              settings.bookPath());
     } else {
-      System.out.println("Opening: " + settings.openingIndex() + ", " + opening.eco() + " " +
-              opening.name() + ", " + String.join(" ", opening.moves()));
+      System.out.println("Openings: drawn from " + settings.bookPath() + " with seed " +
+              settings.seed());
     }
+    System.out.println("Games: " + lines.size() * GAMES_PER_PAIR + " over " + lines.size() +
+            " pairs, ply cap " + settings.plyCap() + ", timeout " + settings.timeoutSeconds() +
+            "s");
     System.out.println();
+  }
+
+  /**
+   * Reports the opening a pair is about to be played from.
+   *
+   * @param pair The number of the pair, counting from one.
+   * @param line The opening the pair is played from.
+   */
+  private static void printPair(final int pair, final BookLine line) {
+    if (line.opening() == null) {
+      System.out.println("Pair " + pair + ": the standard starting position");
+      return;
+    }
+    System.out.println("Pair " + pair + ": line " + line.index() + ", " + line.opening().eco() +
+            " " + line.opening().name() + ", " + String.join(" ", line.opening().moves()));
+  }
+
+  /**
+   * Reports one game as it ends.
+   *
+   * @param game The number of the game within its pair, counting from one.
+   * @param engineAIsWhite True if engine A played White.
+   * @param result How the game ended.
+   * @param verbose True to report the moves the game held.
+   */
+  private static void printGame(final int game, final boolean engineAIsWhite, final Result result,
+                                final boolean verbose) {
+    System.out.printf("  game %d  White %s  %-7s  %3d plies  %s%n", game,
+            engineAIsWhite ? ENGINE_A_NAME : ENGINE_B_NAME, scoreOf(result.outcome()),
+            result.moves().size(), result.reason());
+    if (verbose) {
+      System.out.println("  moves: " + String.join(" ", result.moves()));
+    }
   }
 
   /**
@@ -281,37 +433,76 @@ public class SelfPlayMatch {
    */
   private static void printMove(final int ply, final boolean whiteMoved,
                                 final EngineProcess.Reply reply) {
-    System.out.printf("%4d  %s  %-6s  %9s  %7.2fs%n", ply, whiteMoved ? "W" : "B", reply.move(),
+    System.out.printf("%6d  %s  %-6s  %9s  %7.2fs%n", ply, whiteMoved ? "W" : "B", reply.move(),
             reply.score() == null ? "-" : "cp " + reply.score(), reply.elapsedMillis() / 1000.0);
+  }
+
+  /**
+   * Reports what the games of the match came to.
+   *
+   * @param tally What the games came to.
+   * @param pairs The number of pairs the match was to hold.
+   */
+  private static void printTally(final Tally tally, final int pairs) {
+    final double points = tally.engineAWins() + tally.draws() / 2.0;
+    System.out.println();
+    System.out.println("Played: " + tally.played() + " of " + pairs * GAMES_PER_PAIR + " games");
+    System.out.println("A wins " + tally.engineAWins() + ", B wins " + tally.engineBWins() +
+            ", drawn " + tally.draws());
+    if (tally.played() > 0) {
+      System.out.printf("Score for A: %.1f of %d, %.2f percent%n", points, tally.played(),
+              100.0 * points / tally.played());
+    }
+  }
+
+  /**
+   * Names an outcome as a score from White's point of view.
+   *
+   * @param outcome How a game ended.
+   * @return The score the outcome is written as.
+   */
+  private static String scoreOf(final Outcome outcome) {
+    return switch (outcome) {
+      case WHITE_WINS -> "1-0";
+      case BLACK_WINS -> "0-1";
+      case DRAW -> "1/2-1/2";
+      case FAILURE -> "failed";
+    };
   }
 
   /**
    * Reports how this class is run.
    */
   private static void printUsage() {
-    System.out.println("Usage: SelfPlayMatch --white <command> --black <command> [options]");
+    System.out.println("Usage: SelfPlayMatch --engine-a <command> --engine-b <command> [options]");
     System.out.println();
-    System.out.println("  --white <command>   the command line starting the engine playing White");
-    System.out.println("  --black <command>   the command line starting the engine playing Black");
-    System.out.println("  --nodes <count>     nodes per move, " + DEFAULT_NODE_LIMIT +
+    System.out.println("  --engine-a <command> the command line starting the first engine");
+    System.out.println("  --engine-b <command> the command line starting the second engine");
+    System.out.println("  --pairs <count>      openings to play, each of them played twice with " +
+            "the colours reversed, " + DEFAULT_PAIRS + " by default");
+    System.out.println("  --seed <number>      the seed the book shuffle uses, " + DEFAULT_SEED +
             " by default");
-    System.out.println("  --hash <megabytes>  transposition table size, " + DEFAULT_TABLE_SIZE_MB +
+    System.out.println("  --opening <index>    play only this book line, as one pair");
+    System.out.println("  --nobook             play from the standard starting position");
+    System.out.println("  --nodes <count>      nodes per move, " + DEFAULT_NODE_LIMIT +
             " by default");
-    System.out.println("  --book <path>       the opening book, " + OpeningBook.DEFAULT_BOOK_PATH +
+    System.out.println("  --hash <megabytes>   transposition table size, " + DEFAULT_TABLE_SIZE_MB +
             " by default");
-    System.out.println("  --opening <index>   the book line to start from, the standard starting " +
-            "position by default");
-    System.out.println("  --plycap <count>    the longest game allowed, " + DEFAULT_PLY_CAP +
+    System.out.println("  --book <path>        the opening book, " + OpeningBook.DEFAULT_BOOK_PATH +
             " by default");
-    System.out.println("  --timeout <seconds> the longest wait for an answer, " +
+    System.out.println("  --plycap <count>     the longest game allowed, " + DEFAULT_PLY_CAP +
+            " by default");
+    System.out.println("  --timeout <seconds>  the longest wait for an answer, " +
             DEFAULT_TIMEOUT_SECONDS + " by default");
-    System.out.println("  --logs <directory>  where the engine logs are written, " +
+    System.out.println("  --logs <directory>   where the engine logs are written, " +
             DEFAULT_LOG_DIRECTORY + " by default");
-    System.out.println("  --help              print this message");
+    System.out.println("  --verbose            report every move and the moves of every game");
+    System.out.println("  --help               print this message");
     System.out.println();
-    System.out.println("An engine command line is one argument. Whitespace inside it separates");
-    System.out.println("its arguments except inside double quotes, so a path holding a space can");
-    System.out.println("be written as \"--white\" \"java -jar \"\"C:\\My Builds\\engine.jar\"\"\".");
+    System.out.println("Engine A plays White in the first game of every pair. An engine command");
+    System.out.println("line is one argument. Whitespace inside it separates its arguments except");
+    System.out.println("inside double quotes, so a path holding a space can be written as");
+    System.out.println("\"--engine-a\" \"java -jar \"\"C:\\My Builds\\engine.jar\"\"\".");
   }
 
   /**
@@ -350,22 +541,48 @@ public class SelfPlayMatch {
   }
 
   /**
-   * The Settings record holds what one game is played under.
+   * The Tally record holds what the games of a match came to.
    *
-   * @param whiteCommand The command line starting the engine playing White.
-   * @param blackCommand The command line starting the engine playing Black.
+   * @param engineAWins The games engine A won.
+   * @param engineBWins The games engine B won.
+   * @param draws The games neither engine won.
+   * @param played The games that reached a result.
+   * @param failure What stopped the match, or null if every game reached a result.
+   */
+  public record Tally(int engineAWins, int engineBWins, int draws, int played, String failure) {
+  }
+
+  /**
+   * The BookLine record pairs an opening with the place it was read from in the book.
+   *
+   * @param index The position of the opening in the book, or minus one for the standard starting
+   *              position.
+   * @param opening The opening, or null for the standard starting position.
+   */
+  private record BookLine(int index, OpeningBook.Opening opening) {
+  }
+
+  /**
+   * The Settings record holds what a match is played under.
+   *
+   * @param engineACommand The command line starting the first engine.
+   * @param engineBCommand The command line starting the second engine.
    * @param nodeLimit The largest number of nodes a search may visit for one move.
    * @param tableSizeMB The transposition table size in megabytes given to each engine.
    * @param bookPath The path of the opening book.
-   * @param openingIndex The book line the game starts from, or minus one to start from the
-   *                     standard starting position.
-   * @param plyCap The largest number of plies the game may reach.
+   * @param pairs The number of openings played, each of them played twice.
+   * @param seed The seed the book shuffle uses.
+   * @param openingIndex The only book line to play, or minus one to draw lines from the shuffle.
+   * @param useBook False to play every game from the standard starting position.
+   * @param plyCap The largest number of plies a game may reach.
    * @param timeoutSeconds The longest an engine may take to answer.
    * @param logDirectory The directory the engine logs are written to.
+   * @param verbose True to report every move and the moves of every game.
    */
-  public record Settings(String whiteCommand, String blackCommand, long nodeLimit, int tableSizeMB,
-                         String bookPath, int openingIndex, int plyCap, long timeoutSeconds,
-                         String logDirectory) {
+  public record Settings(String engineACommand, String engineBCommand, long nodeLimit,
+                         int tableSizeMB, String bookPath, int pairs, long seed, int openingIndex,
+                         boolean useBook, int plyCap, long timeoutSeconds, String logDirectory,
+                         boolean verbose) {
 
     /**
      * Reads settings from command line arguments.
@@ -373,32 +590,51 @@ public class SelfPlayMatch {
      * @param args The command line arguments, as described by the usage text.
      * @return The settings the arguments describe, or null if they asked for the usage text.
      * @throws IllegalArgumentException If an argument is unrecognised, names no value, holds a
-     *                                  value that is not a number, or if either engine command
-     *                                  line is missing.
+     *                                  value that is not a number, if either engine command line
+     *                                  is missing, if fewer than one pair is asked for, or if
+     *                                  arguments naming different openings are given together.
      */
     public static Settings read(final String[] args) {
-      String whiteCommand = null;
-      String blackCommand = null;
+      String engineACommand = null;
+      String engineBCommand = null;
       long nodeLimit = DEFAULT_NODE_LIMIT;
       int tableSizeMB = DEFAULT_TABLE_SIZE_MB;
       String bookPath = OpeningBook.DEFAULT_BOOK_PATH;
+      int pairs = DEFAULT_PAIRS;
+      boolean pairsGiven = false;
+      long seed = DEFAULT_SEED;
       int openingIndex = -1;
+      boolean useBook = true;
       int plyCap = DEFAULT_PLY_CAP;
       long timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
       String logDirectory = DEFAULT_LOG_DIRECTORY;
+      boolean verbose = false;
 
       for (int index = 0; index < args.length; index++) {
         final String argument = args[index];
         if ("--help".equals(argument)) {
           return null;
         }
+        if ("--nobook".equals(argument)) {
+          useBook = false;
+          continue;
+        }
+        if ("--verbose".equals(argument)) {
+          verbose = true;
+          continue;
+        }
         final String value = valueOf(args, index, argument);
         switch (argument) {
-          case "--white" -> whiteCommand = value;
-          case "--black" -> blackCommand = value;
+          case "--engine-a" -> engineACommand = value;
+          case "--engine-b" -> engineBCommand = value;
           case "--nodes" -> nodeLimit = number(value, argument);
           case "--hash" -> tableSizeMB = (int) number(value, argument);
           case "--book" -> bookPath = value;
+          case "--pairs" -> {
+            pairs = (int) number(value, argument);
+            pairsGiven = true;
+          }
+          case "--seed" -> seed = number(value, argument);
           case "--opening" -> openingIndex = (int) number(value, argument);
           case "--plycap" -> plyCap = (int) number(value, argument);
           case "--timeout" -> timeoutSeconds = number(value, argument);
@@ -407,11 +643,27 @@ public class SelfPlayMatch {
         }
         index++;
       }
-      if (whiteCommand == null || blackCommand == null) {
-        throw new IllegalArgumentException("Both --white and --black must name a command line");
+
+      if (engineACommand == null || engineBCommand == null) {
+        throw new IllegalArgumentException("Both --engine-a and --engine-b must name a command " +
+                "line");
       }
-      return new Settings(whiteCommand, blackCommand, nodeLimit, tableSizeMB, bookPath,
-              openingIndex, plyCap, timeoutSeconds, logDirectory);
+      if (pairs < 1) {
+        throw new IllegalArgumentException("The value of --pairs must be at least one");
+      }
+      if (openingIndex >= 0) {
+        if (!useBook) {
+          throw new IllegalArgumentException("The argument --opening names a book line, so it " +
+                  "cannot be given with --nobook");
+        }
+        if (pairsGiven && pairs != 1) {
+          throw new IllegalArgumentException("The argument --opening names the only line to " +
+                  "play, so it cannot be given with --pairs " + pairs);
+        }
+        pairs = 1;
+      }
+      return new Settings(engineACommand, engineBCommand, nodeLimit, tableSizeMB, bookPath, pairs,
+              seed, openingIndex, useBook, plyCap, timeoutSeconds, logDirectory, verbose);
     }
 
     /**
