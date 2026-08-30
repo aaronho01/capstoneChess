@@ -53,7 +53,7 @@ public class TacticalSuite {
    * transposition table for as long as its position is running, so raising this raises peak memory
    * in proportion.
    */
-  private static final int DEFAULT_WORKER_THREADS = 4;
+  private static final int DEFAULT_WORKER_THREADS = 1;
 
   /** The command line flag prefix requesting a number of positions to search at once. */
   private static final String WORKERS_FLAG_PREFIX = "--workers=";
@@ -75,8 +75,9 @@ public class TacticalSuite {
 
   /**
    * The positions the suite tests, each paired with the moves that win and the depth to search to.
-   * The depth recorded against a position is the shallowest one that keeps its tactic inside the
-   * search horizon.
+   * The depth recorded against a position keeps its tactic inside the search horizon with a margin.
+   * The shallowest depth that solves a position is not used, because the move a search returns is
+   * not monotonic in depth.
    */
   private static final List<TacticalPosition> STANDARD_POSITIONS = List.of(
           new TacticalPosition("Back rank mate",
@@ -365,7 +366,7 @@ public class TacticalSuite {
               TacticalSuite --help                     print this message
 
             A depth argument overrides the depth recorded against every position. Positions are
-            recorded at the shallowest depth that keeps the tactic inside the search horizon, so
+            recorded at a depth that keeps the tactic inside the search horizon with a margin, so
             overriding downwards is expected to fail some of them.
 
             The workers flag sets how many positions are searched at once, four by default. Every
