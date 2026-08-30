@@ -30,6 +30,9 @@ import java.util.Random;
  * Forsyth-Edwards Notation. Replaying the whole game is what gives each engine the repetition
  * history a game actually has, which its own draw detection depends on.
  * <p>
+ * Each engine searches under its own node limit, which the command line sets for both engines at
+ * once or for one engine at a time.
+ * <p>
  * Search threads are fixed at one for both engines. A node limit is only a meaningful measure of
  * equal effort while one thread is searching, since helper threads contribute nodes that the limit
  * does not account for.
@@ -178,7 +181,12 @@ public class SelfPlayMatch {
           final boolean engineAIsWhite = game == 0;
           final EngineProcess white = engineAIsWhite ? engineA : engineB;
           final EngineProcess black = engineAIsWhite ? engineB : engineA;
-          final Result result = play(settings, line.opening(), white, black);
+          final long whiteNodeLimit =
+                  engineAIsWhite ? settings.nodeLimitA() : settings.nodeLimitB();
+          final long blackNodeLimit =
+                  engineAIsWhite ? settings.nodeLimitB() : settings.nodeLimitA();
+          final Result result = play(settings, line.opening(), white, black, whiteNodeLimit,
+                  blackNodeLimit);
           printGame(game + 1, engineAIsWhite, result, settings.verbose());
           if (result.outcome() == Outcome.FAILURE) {
             return new Tally(engineAWins, engineBWins, draws, played, result.reason());
@@ -207,10 +215,13 @@ public class SelfPlayMatch {
    *                position.
    * @param white The engine playing White.
    * @param black The engine playing Black.
+   * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
+   * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
    * @return The outcome of the game, why it ended, and the moves it held.
    */
   public static Result play(final Settings settings, final OpeningBook.Opening opening,
-                            final EngineProcess white, final EngineProcess black) {
+                            final EngineProcess white, final EngineProcess black,
+                            final long whiteNodeLimit, final long blackNodeLimit) {
     final List<String> moves = new ArrayList<>();
     final Board board = opening == null ? Board.createStandardBoard() : OpeningBook.play(opening);
     if (opening != null) {
@@ -219,7 +230,7 @@ public class SelfPlayMatch {
     try {
       white.newGame();
       black.newGame();
-      return playMoves(settings, board, moves, white, black);
+      return playMoves(settings, board, moves, white, black, whiteNodeLimit, blackNodeLimit);
     } catch (final EngineProcess.Fault fault) {
       return new Result(Outcome.FAILURE, fault.getMessage(), moves);
     }
@@ -247,12 +258,15 @@ public class SelfPlayMatch {
    * @param moves The moves played so far, which this method appends to.
    * @param white The engine playing White.
    * @param black The engine playing Black.
+   * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
+   * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
    * @return The outcome of the game, why it ended, and the moves it held.
    * @throws EngineProcess.Fault If an engine does not answer.
    */
   private static Result playMoves(final Settings settings, final Board board,
                                   final List<String> moves, final EngineProcess white,
-                                  final EngineProcess black) {
+                                  final EngineProcess black, final long whiteNodeLimit,
+                                  final long blackNodeLimit) {
     while (true) {
       final Result terminal = terminalResult(board, moves);
       if (terminal != null) {
@@ -268,7 +282,7 @@ public class SelfPlayMatch {
       final String moverName = "the " + mover.getName() + " engine, playing " +
               (whiteToMove ? "White" : "Black") + ",";
       mover.setPosition(moves);
-      final EngineProcess.Reply reply = mover.go(settings.nodeLimit());
+      final EngineProcess.Reply reply = mover.go(whiteToMove ? whiteNodeLimit : blackNodeLimit);
       if (NULL_MOVE_NOTATION.equals(reply.move())) {
         return new Result(Outcome.FAILURE, moverName + " reported no move in a position the " +
                 "arbiter did not find terminal", moves);
@@ -374,8 +388,12 @@ public class SelfPlayMatch {
   private static void printHeader(final Settings settings, final List<BookLine> lines) {
     System.out.println("Engine A: " + settings.engineACommand());
     System.out.println("Engine B: " + settings.engineBCommand());
-    System.out.println("Nodes: " + settings.nodeLimit() + " per move, hash " +
-            settings.tableSizeMB() + " MB, " + SEARCH_THREADS + " search thread");
+    final String nodes = settings.nodeLimitA() == settings.nodeLimitB() ?
+            String.valueOf(settings.nodeLimitA()) :
+            settings.nodeLimitA() + " for " + ENGINE_A_NAME + " and " + settings.nodeLimitB() +
+                    " for " + ENGINE_B_NAME;
+    System.out.println("Nodes: " + nodes + " per move, hash " + settings.tableSizeMB() + " MB, " +
+            SEARCH_THREADS + " search thread");
     if (!settings.useBook()) {
       System.out.println("Openings: the standard starting position");
     } else if (settings.openingIndex() >= 0) {
@@ -501,8 +519,12 @@ public class SelfPlayMatch {
             " by default");
     System.out.println("  --opening <index>    play only this book line, as one pair");
     System.out.println("  --nobook             play from the standard starting position");
-    System.out.println("  --nodes <count>      nodes per move, " + DEFAULT_NODE_LIMIT +
-            " by default");
+    System.out.println("  --nodes <count>      nodes per move for both engines, " +
+            DEFAULT_NODE_LIMIT + " by default");
+    System.out.println("  --nodes-a <count>    nodes per move for the first engine, overriding " +
+            "--nodes");
+    System.out.println("  --nodes-b <count>    nodes per move for the second engine, overriding " +
+            "--nodes");
     System.out.println("  --hash <megabytes>   transposition table size, " + DEFAULT_TABLE_SIZE_MB +
             " by default");
     System.out.println("  --book <path>        the opening book, " + OpeningBook.DEFAULT_BOOK_PATH +
@@ -584,7 +606,10 @@ public class SelfPlayMatch {
    *
    * @param engineACommand The command line starting the first engine.
    * @param engineBCommand The command line starting the second engine.
-   * @param nodeLimit The largest number of nodes a search may visit for one move.
+   * @param nodeLimitA The largest number of nodes a search by the first engine may visit for one
+   *                   move.
+   * @param nodeLimitB The largest number of nodes a search by the second engine may visit for one
+   *                   move.
    * @param tableSizeMB The transposition table size in megabytes given to each engine.
    * @param bookPath The path of the opening book.
    * @param pairs The number of openings played, each of them played twice.
@@ -596,13 +621,15 @@ public class SelfPlayMatch {
    * @param logDirectory The directory the engine logs are written to.
    * @param verbose True to report every move and the moves of every game.
    */
-  public record Settings(String engineACommand, String engineBCommand, long nodeLimit,
-                         int tableSizeMB, String bookPath, int pairs, long seed, int openingIndex,
-                         boolean useBook, int plyCap, long timeoutSeconds, String logDirectory,
-                         boolean verbose) {
+  public record Settings(String engineACommand, String engineBCommand, long nodeLimitA,
+                         long nodeLimitB, int tableSizeMB, String bookPath, int pairs, long seed,
+                         int openingIndex, boolean useBook, int plyCap, long timeoutSeconds,
+                         String logDirectory, boolean verbose) {
 
     /**
-     * Reads settings from command line arguments.
+     * Reads settings from command line arguments. The argument --nodes sets the node limit of both
+     * engines, and --nodes-a and --nodes-b each set the limit of one engine and override --nodes
+     * whatever order they are given in.
      *
      * @param args The command line arguments, as described by the usage text.
      * @return The settings the arguments describe, or null if they asked for the usage text.
@@ -614,7 +641,9 @@ public class SelfPlayMatch {
     public static Settings read(final String[] args) {
       String engineACommand = null;
       String engineBCommand = null;
-      long nodeLimit = DEFAULT_NODE_LIMIT;
+      Long nodeLimitBoth = null;
+      Long nodeLimitA = null;
+      Long nodeLimitB = null;
       int tableSizeMB = DEFAULT_TABLE_SIZE_MB;
       String bookPath = OpeningBook.DEFAULT_BOOK_PATH;
       int pairs = DEFAULT_PAIRS;
@@ -644,7 +673,9 @@ public class SelfPlayMatch {
         switch (argument) {
           case "--engine-a" -> engineACommand = value;
           case "--engine-b" -> engineBCommand = value;
-          case "--nodes" -> nodeLimit = number(value, argument);
+          case "--nodes" -> nodeLimitBoth = number(value, argument);
+          case "--nodes-a" -> nodeLimitA = number(value, argument);
+          case "--nodes-b" -> nodeLimitB = number(value, argument);
           case "--hash" -> tableSizeMB = (int) number(value, argument);
           case "--book" -> bookPath = value;
           case "--pairs" -> {
@@ -679,8 +710,11 @@ public class SelfPlayMatch {
         }
         pairs = 1;
       }
-      return new Settings(engineACommand, engineBCommand, nodeLimit, tableSizeMB, bookPath, pairs,
-              seed, openingIndex, useBook, plyCap, timeoutSeconds, logDirectory, verbose);
+      final long shared = nodeLimitBoth == null ? DEFAULT_NODE_LIMIT : nodeLimitBoth;
+      final long limitA = nodeLimitA == null ? shared : nodeLimitA;
+      final long limitB = nodeLimitB == null ? shared : nodeLimitB;
+      return new Settings(engineACommand, engineBCommand, limitA, limitB, tableSizeMB, bookPath,
+              pairs, seed, openingIndex, useBook, plyCap, timeoutSeconds, logDirectory, verbose);
     }
 
     /**
