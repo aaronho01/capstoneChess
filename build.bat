@@ -55,6 +55,7 @@ if /i "%TARGET%"=="gui" goto :guiTarget
 if /i "%TARGET%"=="perft" goto :perftTarget
 if /i "%TARGET%"=="tactical" goto :tacticalTarget
 if /i "%TARGET%"=="book" goto :bookTarget
+if /i "%TARGET%"=="match" goto :matchTarget
 if /i "%TARGET%"=="clean" goto :cleanTarget
 echo Unknown target: %TARGET%
 goto :usage
@@ -65,6 +66,7 @@ call :buildGui || exit /b 1
 call :buildSuite "perft" "engine.forTesting.PerftSuite" "src\engine\forTesting\PerftSuite.java" || exit /b 1
 call :buildSuite "tactical" "engine.forTesting.TacticalSuite" "src\engine\forTesting\TacticalSuite.java" || exit /b 1
 call :buildSuite "book" "engine.forTesting.OpeningBook" "src\engine\forTesting\OpeningBook.java" || exit /b 1
+call :buildSuite "match" "engine.forTesting.SelfPlayMatch" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
 goto :done
 
 :uciTarget
@@ -79,12 +81,12 @@ goto :done
 call :buildSuite "perft" "engine.forTesting.PerftSuite" "src\engine\forTesting\PerftSuite.java" || exit /b 1
 goto :done
 
-:tacticalTarget
-call :buildSuite "tactical" "engine.forTesting.TacticalSuite" "src\engine\forTesting\TacticalSuite.java" || exit /b 1
-goto :done
-
 :bookTarget
 call :buildSuite "book" "engine.forTesting.OpeningBook" "src\engine\forTesting\OpeningBook.java" || exit /b 1
+goto :done
+
+:matchTarget
+call :buildSuite "match" "engine.forTesting.SelfPlayMatch" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
 goto :done
 
 :cleanTarget
@@ -106,6 +108,7 @@ echo   gui        compile the interface and package %GUI_JAR%
 echo   perft      compile PerftSuite
 echo   tactical   compile TacticalSuite
 echo   book       compile OpeningBook
+echo   match      compile SelfPlayMatch
 echo   all        every target above, which is the default
 echo   clean      remove %OUT% and both jars
 exit /b 1
