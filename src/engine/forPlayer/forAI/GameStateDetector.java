@@ -19,12 +19,6 @@ public class GameStateDetector {
   /** The singleton instance of the GameStateDetector. */
   private static final GameStateDetector INSTANCE = new GameStateDetector();
 
-  /** Cache to avoid recalculating game state too frequently. */
-  private final Map<Long, GamePhase> gameStateCache = new ConcurrentHashMap<>();
-
-  /** Maximum size for the game state cache to prevent excessive memory usage. */
-  private static final int CACHE_MAX_SIZE = 10000;
-
   /**
    * Enumeration representing the three phases of a chess game.
    */
@@ -72,19 +66,14 @@ public class GameStateDetector {
   }
 
   /**
-   * Determines the current phase of the game by analyzing the board position.
-   * Uses caching to avoid redundant calculations.
+   * Determines the current phase of the game by analyzing the board position. The phase is
+   * recalculated on every call, because it depends on the ply count and on first move and castled
+   * status, which the Zobrist hash does not cover.
    *
    * @param board The current chess board.
    * @return The detected game phase.
    */
   public GamePhase detectGamePhase(final Board board) {
-    long boardHash = board.getZobristHash();
-    GamePhase cached = gameStateCache.get(boardHash);
-    if (cached != null) {
-      return cached;
-    }
-
     int materialScore = calculateMaterialScore(board);
     int developmentScore = calculateDevelopmentScore(board);
     int moveCount = calculateMoveCount(board);
@@ -95,10 +84,6 @@ public class GameStateDetector {
     GamePhase phase = determinePhaseFromIndicators(
             materialScore, developmentScore, moveCount,
             pieceCount, pawnStructureScore, kingActivityScore, board);
-
-    if (gameStateCache.size() < CACHE_MAX_SIZE) {
-      gameStateCache.put(boardHash, phase);
-    }
 
     return phase;
   }
