@@ -4,7 +4,6 @@ import engine.Alliance;
 import engine.forBoard.Board;
 import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
-import engine.forBoard.MovePool;
 
 import java.util.*;
 
@@ -108,11 +107,11 @@ public final class Rook extends Piece {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
         final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
         if (pieceAtDestination == null) {
-          legalMoves.add(MovePool.INSTANCE.getMajorMove(board, this, candidateDestinationCoordinate));
+          legalMoves.add(new Move.MajorMove(board, this, candidateDestinationCoordinate));
         } else {
           final Alliance pieceAlliance = pieceAtDestination.getPieceAllegiance();
           if (this.pieceAlliance != pieceAlliance) {
-            legalMoves.add(MovePool.INSTANCE.getMajorAttackMove(board, this, candidateDestinationCoordinate, pieceAtDestination));
+            legalMoves.add(new Move.MajorAttackMove(board, this, candidateDestinationCoordinate, pieceAtDestination));
           }
           break;
         }

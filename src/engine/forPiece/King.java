@@ -4,7 +4,6 @@ import engine.Alliance;
 import engine.forBoard.Board;
 import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
-import engine.forBoard.MovePool;
 
 import java.util.*;
 
@@ -153,11 +152,11 @@ public final class King extends Piece {
       final int candidateDestinationCoordinate = this.piecePosition + currentCandidateOffset;
       final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
       if (pieceAtDestination == null) {
-        legalMoves.add(MovePool.INSTANCE.getMajorMove(board, this, candidateDestinationCoordinate));
+        legalMoves.add(new Move.MajorMove(board, this, candidateDestinationCoordinate));
       } else {
         final Alliance pieceAtDestinationAllegiance = pieceAtDestination.getPieceAllegiance();
         if (this.pieceAlliance != pieceAtDestinationAllegiance) {
-          legalMoves.add(MovePool.INSTANCE.getMajorAttackMove(board, this, candidateDestinationCoordinate,
+          legalMoves.add(new Move.MajorAttackMove(board, this, candidateDestinationCoordinate,
                   pieceAtDestination));
         }
       }

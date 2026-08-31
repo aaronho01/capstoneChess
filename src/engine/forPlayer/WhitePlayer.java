@@ -4,7 +4,6 @@ import engine.Alliance;
 import engine.forBoard.Board;
 import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
-import engine.forBoard.MovePool;
 import engine.forPiece.Piece;
 import engine.forPiece.Rook;
 
@@ -69,7 +68,7 @@ public final class WhitePlayer extends Player {
                   !Player.isSquareAttacked(62, opponentPieces, this.board) &&
                   kingSideRook.getPieceType() == ROOK) {
             if(BoardUtils.isKingPawnTrap(this.board, this.playerKing, 52)) {
-              kingCastles.add(MovePool.INSTANCE.getKingSideCastleMove(this.board, this.playerKing, 62, (Rook) kingSideRook, kingSideRook.getPiecePosition(), 61));
+              kingCastles.add(new Move.KingSideCastleMove(this.board, this.playerKing, 62, (Rook) kingSideRook, kingSideRook.getPiecePosition(), 61));
             }
           }
         }
@@ -80,7 +79,7 @@ public final class WhitePlayer extends Player {
           if(!Player.isSquareAttacked(58, opponentPieces, this.board) &&
                   !Player.isSquareAttacked(59, opponentPieces, this.board) && queenSideRook.getPieceType() == ROOK) {
             if(BoardUtils.isKingPawnTrap(this.board, this.playerKing, 52)) {
-              kingCastles.add(MovePool.INSTANCE.getQueenSideCastleMove(this.board, this.playerKing, 58, (Rook) queenSideRook, queenSideRook.getPiecePosition(), 59));
+              kingCastles.add(new Move.QueenSideCastleMove(this.board, this.playerKing, 58, (Rook) queenSideRook, queenSideRook.getPiecePosition(), 59));
             }
           }
         }

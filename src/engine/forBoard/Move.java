@@ -10,7 +10,6 @@ import java.util.Objects;
  * The Move class represents a move in a game of chess.
  * This abstract class provides the base functionality for all types of chess moves,
  * including standard moves, attack moves, castling, en passant, and pawn promotion.
- * The class has been modified to support object pooling for better memory efficiency.
  * <p>
  * Different types of moves are represented by specialized subclasses, each implementing
  * the specific behavior and rules for that move type.
@@ -74,14 +73,6 @@ public abstract class Move {
   }
 
   /**
-   * Reset method for object pooling. Must be overridden by subclasses.
-   * This method allows move objects to be reused to reduce garbage collection pressure.
-   *
-   * @return The reset move object.
-   */
-  protected abstract Move reset();
-
-  /**
    * Returns the piece a pawn is promoted to by this move, or null if this move is not a promotion.
    * Promotion is part of move identity, since four distinct legal moves can otherwise share the
    * same pair of squares.
@@ -112,8 +103,8 @@ public abstract class Move {
     if (this == other) return true;
     if (!(other instanceof Move otherMove)) return false;
     return getCurrentCoordinate() == otherMove.getCurrentCoordinate() &&
-        getDestinationCoordinate() == otherMove.getDestinationCoordinate() &&
-        promotionType() == otherMove.promotionType();
+            getDestinationCoordinate() == otherMove.getDestinationCoordinate() &&
+            promotionType() == otherMove.promotionType();
   }
 
   /**
@@ -361,7 +352,7 @@ public abstract class Move {
   String disambiguationFile(final Board position) {
     for (final Move move: position.currentPlayer().getLegalMoves()) {
       if (move.getDestinationCoordinate() == this.destinationCoordinate && !this.equals(move) &&
-          this.movedPiece.getPieceType().equals(move.getMovedPiece().getPieceType())) {
+              this.movedPiece.getPieceType().equals(move.getMovedPiece().getPieceType())) {
         return BoardUtils.getPositionAtCoordinate(this.movedPiece.getPiecePosition()).substring(0, 1);
       }
     } return "";
@@ -499,16 +490,6 @@ public abstract class Move {
     }
 
     /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
      * Gets the current coordinate, which is set to -1 for a null move.
      *
      * @return The current coordinate, which is -1.
@@ -570,32 +551,6 @@ public abstract class Move {
     }
 
     /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
-     * Resets the MajorMove with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The piece being moved.
-     * @param destinationCoordinate The destination coordinate.
-     * @return The reset MajorMove instance.
-     */
-    public MajorMove reset(final Board board, final Piece pieceMoved, final int destinationCoordinate) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      return this;
-    }
-
-    /**
      * Generates a string representation of the major move.
      *
      * @return The string representing the move, e.g., "Qd4" for a queen move to d4.
@@ -615,7 +570,7 @@ public abstract class Move {
     @Override
     public String toNotation(final Board position) {
       return movedPiece.getPieceType().toString() + disambiguationFile(position) +
-          BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
+              BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
     }
   }
 
@@ -640,34 +595,6 @@ public abstract class Move {
     }
 
     /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
-     * Resets the MajorAttackMove with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The piece being moved.
-     * @param destinationCoordinate The destination coordinate.
-     * @param pieceAttacked The piece being attacked and captured.
-     * @return The reset MajorAttackMove instance.
-     */
-    public MajorAttackMove reset(final Board board, final Piece pieceMoved, final int destinationCoordinate, final Piece pieceAttacked) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      this.attackedPiece = pieceAttacked;
-      return this;
-    }
-
-    /**
      * Generates a string representation of the major attack move.
      *
      * @return The string representing the move, e.g., "Qxd4" for a queen capturing a piece on d4.
@@ -688,7 +615,7 @@ public abstract class Move {
     @Override
     public String toNotation(final Board position) {
       return movedPiece.getPieceType() + disambiguationFile(position) + "x" +
-          BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
+              BoardUtils.getPositionAtCoordinate(this.destinationCoordinate);
     }
   }
 
@@ -707,32 +634,6 @@ public abstract class Move {
      */
     public PawnMove(final Board board, final Piece pieceMoved, final int destinationCoordinate) {
       super(board, pieceMoved, destinationCoordinate);
-    }
-
-    /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
-     * Resets the PawnMove with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The pawn being moved.
-     * @param destinationCoordinate The destination coordinate.
-     * @return The reset PawnMove instance.
-     */
-    public PawnMove reset(final Board board, final Piece pieceMoved, final int destinationCoordinate) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      return this;
     }
 
     /**
@@ -766,34 +667,6 @@ public abstract class Move {
     }
 
     /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
-     * Resets the PawnAttackMove with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The pawn being moved.
-     * @param destinationCoordinate The destination coordinate.
-     * @param pieceAttacked The piece being attacked and captured.
-     * @return The reset PawnAttackMove instance.
-     */
-    public PawnAttackMove reset(final Board board, final Piece pieceMoved, final int destinationCoordinate, final Piece pieceAttacked) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      this.attackedPiece = pieceAttacked;
-      return this;
-    }
-
-    /**
      * Generates a string representation of the pawn attack move.
      *
      * @return The string representing the move, e.g., "exd4" for a pawn capturing a piece on d4.
@@ -821,32 +694,6 @@ public abstract class Move {
      */
     public PawnJump(final Board board, final Pawn pieceMoved, final int destinationCoordinate) {
       super(board, pieceMoved, destinationCoordinate);
-    }
-
-    /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
-     * Resets the PawnJump with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The pawn being jumped.
-     * @param destinationCoordinate The destination coordinate.
-     * @return The reset PawnJump instance.
-     */
-    public PawnJump reset(final Board board, final Piece pieceMoved, final int destinationCoordinate) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      return this;
     }
 
     /**
@@ -908,24 +755,6 @@ public abstract class Move {
      */
     public PawnEnPassantAttack(final Board board, final Piece pieceMoved, final int destinationCoordinate, final Piece pieceAttacked) {
       super(board, pieceMoved, destinationCoordinate, pieceAttacked);
-    }
-
-    /**
-     * Resets the PawnEnPassantAttack with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The pawn being moved.
-     * @param destinationCoordinate The destination coordinate.
-     * @param pieceAttacked The pawn being captured en passant.
-     * @return The reset PawnEnPassantAttack instance.
-     */
-    public PawnEnPassantAttack reset(final Board board, final Piece pieceMoved, final int destinationCoordinate, final Piece pieceAttacked) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      this.attackedPiece = pieceAttacked;
-      return this;
     }
 
     /**
@@ -992,24 +821,6 @@ public abstract class Move {
       this.promotedPawn = (decoratedMove != null && decoratedMove.getMovedPiece() instanceof Pawn) ?
               (Pawn) decoratedMove.getMovedPiece() : null;
       this.promotionPiece = promotionPiece;
-    }
-
-    /**
-     * Resets the PawnPromotion with new values for object pooling.
-     *
-     * @param decoratedMove The base move to be decorated with promotion.
-     * @param promotionPiece The piece type to which the pawn will be promoted.
-     * @return The reset PawnPromotion instance.
-     */
-    public PawnPromotion reset(final Move decoratedMove, final Piece promotionPiece) {
-      this.decoratedMove = decoratedMove;
-      this.promotedPawn = (Pawn) decoratedMove.getMovedPiece();
-      this.promotionPiece = promotionPiece;
-      this.board = decoratedMove.getBoard();
-      this.movedPiece = decoratedMove.getMovedPiece();
-      this.destinationCoordinate = decoratedMove.getDestinationCoordinate();
-      this.isFirstMove = decoratedMove.getMovedPiece() != null && decoratedMove.getMovedPiece().isFirstMove();
-      return this;
     }
 
     /**
@@ -1283,39 +1094,6 @@ public abstract class Move {
     }
 
     /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
-     * Resets the KingSideCastleMove with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The king being moved.
-     * @param destinationCoordinate The destination coordinate for the king.
-     * @param castleRook The rook being moved in this castling operation.
-     * @param castleRookStart The starting position of the rook.
-     * @param castleRookDestination The destination position of the rook.
-     * @return The reset KingSideCastleMove instance.
-     */
-    public KingSideCastleMove reset(final Board board, final Piece pieceMoved, final int destinationCoordinate,
-                                    final Rook castleRook, final int castleRookStart, final int castleRookDestination) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      this.castleRook = castleRook;
-      this.castleRookStart = castleRookStart;
-      this.castleRookDestination = castleRookDestination;
-      return this;
-    }
-
-    /**
      * Returns a string representation of the KingSideCastleMove, indicating king-side castling.
      *
      * @return The string "O-O" representing king-side castling.
@@ -1351,39 +1129,6 @@ public abstract class Move {
                                final int castleRookStart,
                                final int rookCastleDestination) {
       super(board, pieceMoved, destinationCoordinate, castleRook, castleRookStart, rookCastleDestination);
-    }
-
-    /**
-     * Reset method for object pooling.
-     *
-     * @return The reset move object.
-     */
-    @Override
-    protected Move reset() {
-      return this;
-    }
-
-    /**
-     * Resets the QueenSideCastleMove with new values for object pooling.
-     *
-     * @param board The chess board for this move.
-     * @param pieceMoved The king being moved.
-     * @param destinationCoordinate The destination coordinate for the king.
-     * @param castleRook The rook being moved in this castling operation.
-     * @param castleRookStart The starting position of the rook.
-     * @param castleRookDestination The destination position of the rook.
-     * @return The reset QueenSideCastleMove instance.
-     */
-    public QueenSideCastleMove reset(final Board board, final Piece pieceMoved, final int destinationCoordinate,
-                                     final Rook castleRook, final int castleRookStart, final int castleRookDestination) {
-      this.board = board;
-      this.movedPiece = pieceMoved;
-      this.destinationCoordinate = destinationCoordinate;
-      this.isFirstMove = pieceMoved != null && pieceMoved.isFirstMove();
-      this.castleRook = castleRook;
-      this.castleRookStart = castleRookStart;
-      this.castleRookDestination = castleRookDestination;
-      return this;
     }
 
     /**
@@ -1456,7 +1201,7 @@ public abstract class Move {
                                   final Piece.PieceType promotionType) {
       for (final Move move : board.getAllLegalMoves()) {
         if (move.getCurrentCoordinate() != currentCoordinate ||
-            move.getDestinationCoordinate() != destinationCoordinate) {
+                move.getDestinationCoordinate() != destinationCoordinate) {
           continue;
         }
         final Piece promotion = move.getPromotionPiece();

@@ -4,7 +4,6 @@ import engine.Alliance;
 import engine.forBoard.Board;
 import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
-import engine.forBoard.MovePool;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -90,18 +89,18 @@ public final class Pawn extends Piece {
 
       if (currentCandidateOffset == 8 && board.getPiece(candidateDestinationCoordinate) == null) {
         if (this.pieceAlliance.isPawnPromotionSquare(candidateDestinationCoordinate)) {
-          Move pawnMove = MovePool.INSTANCE.getPawnMove(board, this, candidateDestinationCoordinate);
+          Move pawnMove = new Move.PawnMove(board, this, candidateDestinationCoordinate);
 
-          legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+          legalMoves.add(new Move.PawnPromotion(
                   pawnMove, PieceUtils.Instance.getMovedQueen(this.pieceAlliance, candidateDestinationCoordinate)));
-          legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+          legalMoves.add(new Move.PawnPromotion(
                   pawnMove, PieceUtils.Instance.getMovedRook(this.pieceAlliance, candidateDestinationCoordinate)));
-          legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+          legalMoves.add(new Move.PawnPromotion(
                   pawnMove, PieceUtils.Instance.getMovedBishop(this.pieceAlliance, candidateDestinationCoordinate)));
-          legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+          legalMoves.add(new Move.PawnPromotion(
                   pawnMove, PieceUtils.Instance.getMovedKnight(this.pieceAlliance, candidateDestinationCoordinate)));
         } else {
-          legalMoves.add(MovePool.INSTANCE.getPawnMove(board, this, candidateDestinationCoordinate));
+          legalMoves.add(new Move.PawnMove(board, this, candidateDestinationCoordinate));
         }
       }
       else if (currentCandidateOffset == 16 && this.isFirstMove() &&
@@ -111,7 +110,7 @@ public final class Pawn extends Piece {
                 this.piecePosition + (this.pieceAlliance.getDirection() * 8);
         if (board.getPiece(candidateDestinationCoordinate) == null &&
                 board.getPiece(behindCandidateDestinationCoordinate) == null) {
-          legalMoves.add(MovePool.INSTANCE.getPawnJump(board, this, candidateDestinationCoordinate));
+          legalMoves.add(new Move.PawnJump(board, this, candidateDestinationCoordinate));
         }
       }
       else if (currentCandidateOffset == 7 &&
@@ -121,25 +120,25 @@ public final class Pawn extends Piece {
           final Piece pieceOnCandidate = board.getPiece(candidateDestinationCoordinate);
           if (this.pieceAlliance != pieceOnCandidate.getPieceAllegiance()) {
             if (this.pieceAlliance.isPawnPromotionSquare(candidateDestinationCoordinate)) {
-              Move pawnAttackMove = MovePool.INSTANCE.getPawnAttackMove(board, this, candidateDestinationCoordinate, pieceOnCandidate);
+              Move pawnAttackMove = new Move.PawnAttackMove(board, this, candidateDestinationCoordinate, pieceOnCandidate);
 
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedQueen(this.pieceAlliance, candidateDestinationCoordinate)));
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedRook(this.pieceAlliance, candidateDestinationCoordinate)));
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedBishop(this.pieceAlliance, candidateDestinationCoordinate)));
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedKnight(this.pieceAlliance, candidateDestinationCoordinate)));
             } else {
-              legalMoves.add(MovePool.INSTANCE.getPawnAttackMove(board, this, candidateDestinationCoordinate, pieceOnCandidate));
+              legalMoves.add(new Move.PawnAttackMove(board, this, candidateDestinationCoordinate, pieceOnCandidate));
             }
           }
         } else if (board.getEnPassantPawn() != null && board.getEnPassantPawn().getPiecePosition() ==
                 (this.piecePosition + (this.pieceAlliance.getOppositeDirection()))) {
           final Piece pieceOnCandidate = board.getEnPassantPawn();
           if (this.pieceAlliance != pieceOnCandidate.getPieceAllegiance()) {
-            legalMoves.add(MovePool.INSTANCE.getPawnEnPassantAttack(board, this, candidateDestinationCoordinate, pieceOnCandidate));
+            legalMoves.add(new Move.PawnEnPassantAttack(board, this, candidateDestinationCoordinate, pieceOnCandidate));
           }
         }
       }
@@ -150,19 +149,19 @@ public final class Pawn extends Piece {
           if (this.pieceAlliance !=
                   board.getPiece(candidateDestinationCoordinate).getPieceAllegiance()) {
             if (this.pieceAlliance.isPawnPromotionSquare(candidateDestinationCoordinate)) {
-              Move pawnAttackMove = MovePool.INSTANCE.getPawnAttackMove(board, this, candidateDestinationCoordinate,
+              Move pawnAttackMove = new Move.PawnAttackMove(board, this, candidateDestinationCoordinate,
                       board.getPiece(candidateDestinationCoordinate));
 
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedQueen(this.pieceAlliance, candidateDestinationCoordinate)));
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedRook(this.pieceAlliance, candidateDestinationCoordinate)));
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedBishop(this.pieceAlliance, candidateDestinationCoordinate)));
-              legalMoves.add(MovePool.INSTANCE.getPawnPromotion(
+              legalMoves.add(new Move.PawnPromotion(
                       pawnAttackMove, PieceUtils.Instance.getMovedKnight(this.pieceAlliance, candidateDestinationCoordinate)));
             } else {
-              legalMoves.add(MovePool.INSTANCE.getPawnAttackMove(board, this, candidateDestinationCoordinate,
+              legalMoves.add(new Move.PawnAttackMove(board, this, candidateDestinationCoordinate,
                       board.getPiece(candidateDestinationCoordinate)));
             }
           }
@@ -170,7 +169,7 @@ public final class Pawn extends Piece {
                 (this.piecePosition - (this.pieceAlliance.getOppositeDirection()))) {
           final Piece pieceOnCandidate = board.getEnPassantPawn();
           if (this.pieceAlliance != pieceOnCandidate.getPieceAllegiance()) {
-            legalMoves.add(MovePool.INSTANCE.getPawnEnPassantAttack(board, this, candidateDestinationCoordinate, pieceOnCandidate));
+            legalMoves.add(new Move.PawnEnPassantAttack(board, this, candidateDestinationCoordinate, pieceOnCandidate));
           }
         }
       }
@@ -196,9 +195,9 @@ public final class Pawn extends Piece {
     }
 
     final int candidateNine = this.piecePosition + (this.pieceAlliance.getDirection() * 9);
-      return candidateNine == targetSquare && BoardUtils.isValidTileCoordinate(candidateNine) &&
-              !((BoardUtils.Instance.FirstColumn.get(this.piecePosition) && this.pieceAlliance.isWhite()) ||
-                      (BoardUtils.Instance.EighthColumn.get(this.piecePosition) && this.pieceAlliance.isBlack()));
+    return candidateNine == targetSquare && BoardUtils.isValidTileCoordinate(candidateNine) &&
+            !((BoardUtils.Instance.FirstColumn.get(this.piecePosition) && this.pieceAlliance.isWhite()) ||
+                    (BoardUtils.Instance.EighthColumn.get(this.piecePosition) && this.pieceAlliance.isBlack()));
   }
 
   /**
