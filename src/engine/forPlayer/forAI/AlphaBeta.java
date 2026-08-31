@@ -395,12 +395,15 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * leave in the shared transposition table. They are stopped as soon as the main search finishes,
    * and this method does not return until they have.
    * <p>
-   * The board handed to this method is never modified. The thread pool, transposition table,
-   * history heuristic, and countermove table survive this call and carry into the next search.
-   * A caller that is finished with this engine must call {@link #shutdown()}.
+   * A search that reaches the node limit is stopped where it stands and the iteration it was in
+   * the middle of is discarded, so the move and score returned are those of the deepest iteration
+   * that finished. The first iteration is never held to the limit, so a finished iteration always
+   * exists.
    *
    * @param board The current chess board position.
    * @param searchDepth The maximum depth for iterative deepening on this search.
+   * @param nodeLimit The number of positions to evaluate before the search is stopped, or
+   *                  UNLIMITED_NODES to run every iteration to its end.
    * @return The best move determined by the search algorithm.
    */
   public Move execute(final Board board, final int searchDepth, final long nodeLimit) {
@@ -431,7 +434,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
                 searchRootAspirationWindow(mainBoard, currentDepth, bestMove, bestScore) :
                 searchRoot(mainBoard, currentDepth, -Double.MAX_VALUE, Double.MAX_VALUE, bestMove);
 
-        if (result.move() == MoveFactory.getNullMove()) {
+        if (searchStopped || result.move() == MoveFactory.getNullMove()) {
           break;
         }
 
@@ -577,7 +580,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * @param depth The current search depth.
    * @param previousBestMove The best move from the previous iteration.
    * @param previousScore The root score from the previous iteration.
-   * @return The best move found and its score.
+   * @return The best move found and its score, or the null move and a score of zero if the search
+   *         was stopped before an attempt finished.
    */
   private RootResult searchRootAspirationWindow(final Board board, final int depth,
                                                 final Move previousBestMove, final double previousScore) {
@@ -591,7 +595,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     for (int attempt = 0; attempt < 2; attempt++) {
       final RootResult result = searchRoot(board, depth, alpha, beta, previousBestMove);
 
-      if (this.searchStopped || (result.score() > alpha && result.score() < beta)) {
+      if (this.searchStopped) {
+        return new RootResult(MoveFactory.getNullMove(), 0);
+      } if (result.score() > alpha && result.score() < beta) {
         return result;
       }
 
