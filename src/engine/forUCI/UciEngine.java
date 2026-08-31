@@ -237,12 +237,12 @@ public class UciEngine {
   }
 
   /**
-   * Searches the current position and reports the score and the best move. A go command naming a
-   * node limit searches to a fixed ceiling until the limit is reached, one naming a depth searches
-   * to that depth without a node limit, and one naming neither uses the default node limit. A
-   * search that returns no move is reported as the null move with no score, which is what a
-   * terminal position produces. A score holding a checkmate is reported as a distance to mate
-   * rather than in centipawns.
+   * Searches the current position and reports the depth reached, the score, and the best move. A
+   * go command naming a node limit searches to a fixed ceiling until the limit is reached, one
+   * naming a depth searches to that depth without a node limit, and one naming neither uses the
+   * default node limit. A search that returns no move is reported as the null move with no depth
+   * or score, which is what a terminal position produces. A score holding a checkmate is reported
+   * as a distance to mate rather than in centipawns.
    *
    * @param tokens The whitespace separated tokens of the command.
    * @throws IllegalArgumentException If a limit is not a number.
@@ -267,7 +267,8 @@ public class UciEngine {
       final double score = engine().getLastScore();
       final double relativeScore =
               this.board.currentPlayer().getAlliance().isWhite() ? score : -score;
-      this.protocol.println("info score " + scoreOf(relativeScore));
+      this.protocol.println("info depth " + engine().getLastDepth() + " score " +
+              scoreOf(relativeScore));
     }
     this.protocol.println("bestmove " + notation);
   }

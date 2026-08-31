@@ -44,12 +44,6 @@ public class EngineProcess implements AutoCloseable {
   /** The time a process is given to exit before a fault reports it as still running. */
   private static final long EXIT_GRACE_MILLIS = 500;
 
-  /** The prefix of the protocol line reporting a score in centipawns. */
-  private static final String CENTIPAWN_SCORE_PREFIX = "info score cp ";
-
-  /** The prefix of the protocol line reporting a score as a distance to mate. */
-  private static final String MATE_SCORE_PREFIX = "info score mate ";
-
   /** The name used for this engine in fault messages. */
   private final String name;
 
@@ -167,32 +161,46 @@ public class EngineProcess implements AutoCloseable {
   }
 
   /**
-   * Searches the current position under a node limit and reads the reply.
+   * Searches the current position under a node limit and reads the reply. Every information line
+   * the engine writes before its move is read, and the fields of the last one reporting a depth or
+   * a score are the ones the reply holds. Fields this class does not know are passed over.
    *
    * @param nodeLimit The largest number of nodes the search may visit.
-   * @return The move the engine chose, the score it reported, and the time the search took.
+   * @return The move the engine chose, the depth and score it reported, and the time the search
+   *         took.
    * @throws Fault If the engine does not report a move before the timeout.
    */
   public Reply go(final long nodeLimit) {
     final long start = System.nanoTime();
     send("go nodes " + nodeLimit);
+    Integer depth = null;
     Integer score = null;
     Integer mateIn = null;
     while (true) {
       final String line = readLine("bestmove");
-      if (line.startsWith(CENTIPAWN_SCORE_PREFIX)) {
-        score = readNumber(line, CENTIPAWN_SCORE_PREFIX);
-        mateIn = null;
-      } else if (line.startsWith(MATE_SCORE_PREFIX)) {
-        mateIn = readNumber(line, MATE_SCORE_PREFIX);
-        score = null;
-      } else if (line.startsWith("bestmove")) {
-        final String[] tokens = line.split("\\s+");
+      final String[] tokens = line.split("\\s+");
+      if ("bestmove".equals(tokens[0])) {
         if (tokens.length < 2) {
           throw new Fault(this.name, "reported a move command with no move: " + line);
         }
         final long elapsed = (System.nanoTime() - start) / 1_000_000L;
-        return new Reply(tokens[1], score, mateIn, elapsed);
+        return new Reply(tokens[1], depth, score, mateIn, elapsed);
+      }
+      if (!"info".equals(tokens[0])) {
+        continue;
+      }
+      for (int index = 1; index < tokens.length; index++) {
+        if ("depth".equals(tokens[index])) {
+          depth = readNumber(tokens, index + 1);
+        } else if ("score".equals(tokens[index]) && index + 1 < tokens.length) {
+          if ("cp".equals(tokens[index + 1])) {
+            score = readNumber(tokens, index + 2);
+            mateIn = null;
+          } else if ("mate".equals(tokens[index + 1])) {
+            mateIn = readNumber(tokens, index + 2);
+            score = null;
+          }
+        }
       }
     }
   }
@@ -364,15 +372,18 @@ public class EngineProcess implements AutoCloseable {
   }
 
   /**
-   * Reads the number a score line reports.
+   * Reads the number an information line holds at one of its positions.
    *
-   * @param line The protocol line reporting the score.
-   * @param prefix The prefix of the line, which the number follows.
-   * @return The number the line holds, or null if it does not hold one.
+   * @param tokens The whitespace separated tokens of the line.
+   * @param index The position the number is read from.
+   * @return The number at that position, or null if the line ends before it or it is not a number.
    */
-  private static Integer readNumber(final String line, final String prefix) {
+  private static Integer readNumber(final String[] tokens, final int index) {
+    if (index >= tokens.length) {
+      return null;
+    }
     try {
-      return Integer.valueOf(line.substring(prefix.length()).trim());
+      return Integer.valueOf(tokens[index]);
     } catch (final NumberFormatException exception) {
       return null;
     }
@@ -426,6 +437,7 @@ public class EngineProcess implements AutoCloseable {
    * distance to mate is held, since a search reports a position as either an evaluation or a mate.
    *
    * @param move The move the engine chose, in long algebraic notation.
+   * @param depth The depth the engine reported its search reached, or null if it reported nothing.
    * @param score The score the engine reported in centipawns, or null if it reported a mate or
    *              reported nothing.
    * @param mateIn The number of moves to the mate the engine reported, positive when the engine
@@ -433,7 +445,8 @@ public class EngineProcess implements AutoCloseable {
    *               in centipawns or reported nothing.
    * @param elapsedMillis The time the search took, in milliseconds.
    */
-  public record Reply(String move, Integer score, Integer mateIn, long elapsedMillis) {
+  public record Reply(String move, Integer depth, Integer score, Integer mateIn,
+                      long elapsedMillis) {
   }
 
   /**

@@ -48,6 +48,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The root score of the most recent search, from White's point of view. */
   private volatile double lastScore;
 
+  /** The depth of the deepest iteration the most recent search finished. */
+  private volatile int lastDepth;
+
   /** Thread-local search statistics for tracking per-thread performance metrics. */
   private final ThreadLocal<SearchStats> threadStats = new ThreadLocal<>();
 
@@ -410,6 +413,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     final long startTime = System.currentTimeMillis();
     Move bestMove = MoveFactory.getNullMove();
     double bestScore = 0;
+    int bestDepth = 0;
 
     this.searchStopped = false;
     this.boardsEvaluated.set(0);
@@ -440,6 +444,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
         bestMove = result.move();
         bestScore = result.score();
+        bestDepth = currentDepth;
 
         updateHistoryHeuristic(bestMove, currentDepth);
 
@@ -465,6 +470,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             "The main search left its board somewhere other than the root position.";
 
     this.lastScore = bestScore;
+    this.lastDepth = bestDepth;
 
     return bestMove;
   }
@@ -550,6 +556,17 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    */
   public double getLastScore() {
     return this.lastScore;
+  }
+
+  /**
+   * Returns the depth of the deepest iteration the most recent search finished. An iteration the
+   * node limit aborted is not counted, and the depth is the one the calling thread reached rather
+   * than the one any helper thread reached.
+   *
+   * @return The depth the last search finished, or zero if it finished no iteration.
+   */
+  public int getLastDepth() {
+    return this.lastDepth;
   }
 
   /**
