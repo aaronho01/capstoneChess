@@ -42,6 +42,12 @@ import java.util.Random;
  * board before it is judged on the scores, so a checkmate is a checkmate rather than an
  * adjudicated win.
  * <p>
+ * A match may also be stopped by the sequential test {@link MatchStatistics} holds, which ends it
+ * as soon as the games have settled on one of two hypotheses rather than playing every pair asked
+ * for. The test is weighed at the end of a pair rather than after a game, since the pair is what
+ * balances the colours and a test read between the two games of one pair is read on a match that
+ * gave one engine White more often than the other.
+ * <p>
  * The arbiter uses the move generation of the build it was compiled from, not that of either
  * engine, so a move generation fault shared by both engines would be invisible here. That is what
  * {@link PerftSuite} covers.
@@ -73,6 +79,18 @@ public class SelfPlayMatch {
 
   /** The ply a game must have reached before it may be drawn on score, by default. */
   private static final int DEFAULT_DRAW_AFTER = 80;
+
+  /** The Elo difference the null hypothesis holds when no other difference is given. */
+  private static final double DEFAULT_NULL_ELO = 0.0;
+
+  /** The Elo difference the alternative hypothesis holds when no other difference is given. */
+  private static final double DEFAULT_GAIN_ELO = 5.0;
+
+  /** The chance of accepting the alternative when the null holds, when no other rate is given. */
+  private static final double DEFAULT_FALSE_POSITIVE_RATE = 0.05;
+
+  /** The chance of accepting the null when the alternative holds, when no other rate is given. */
+  private static final double DEFAULT_FALSE_NEGATIVE_RATE = 0.05;
 
   /** The time an engine is allowed to take to answer, in seconds, when no other time is given. */
   private static final long DEFAULT_TIMEOUT_SECONDS = 60;
@@ -154,7 +172,7 @@ public class SelfPlayMatch {
 
     printHeader(settings, lines);
     final Tally tally = runMatch(settings, lines);
-    printTally(tally, lines.size());
+    printTally(tally, lines.size(), settings.sequentialTest());
     if (tally.failure() != null) {
       System.out.println();
       System.out.println("The match stopped: " + tally.failure());
@@ -225,11 +243,36 @@ public class SelfPlayMatch {
             engineBWins++;
           }
         }
+        if (settled(settings.sequentialTest(), engineAWins, engineBWins, draws)) {
+          break;
+        }
       }
     } catch (final EngineProcess.Fault fault) {
       return new Tally(engineAWins, engineBWins, draws, played, adjudicated, fault.getMessage());
     }
     return new Tally(engineAWins, engineBWins, draws, played, adjudicated, null);
+  }
+
+  /**
+   * Reports what the sequential test comes to after a pair and decides whether the games have
+   * settled it. A match holding no test is never settled this way and reports nothing.
+   *
+   * @param test The hypotheses the games are weighed between, or null if the match holds no test.
+   * @param engineAWins The games engine A has won.
+   * @param engineBWins The games engine B has won.
+   * @param draws The games neither engine has won.
+   * @return True if the match should stop before its remaining pairs are played.
+   */
+  private static boolean settled(final MatchStatistics.SequentialTest test, final int engineAWins,
+                                 final int engineBWins, final int draws) {
+    if (test == null) {
+      return false;
+    }
+    final MatchStatistics statistics = new MatchStatistics(engineAWins, engineBWins, draws);
+    System.out.printf("  test    LLR %+.2f of %+.2f to %+.2f after %d games%n",
+            statistics.logLikelihoodRatio(test), test.lowerBound(), test.upperBound(),
+            statistics.games());
+    return statistics.conclude(test) != MatchStatistics.Conclusion.UNDECIDED;
   }
 
   /**
@@ -464,6 +507,15 @@ public class SelfPlayMatch {
     } else {
       System.out.println("Adjudication: off");
     }
+    final MatchStatistics.SequentialTest test = settings.sequentialTest();
+    if (test == null) {
+      System.out.println("Sequential test: off");
+    } else {
+      System.out.printf("Sequential test: %.1f Elo against %.1f Elo, error rates %.3f and %.3f, " +
+                      "bounds %+.2f to %+.2f%n", test.nullElo(), test.gainElo(),
+              test.falsePositiveRate(), test.falseNegativeRate(), test.lowerBound(),
+              test.upperBound());
+    }
     System.out.println();
   }
 
@@ -539,8 +591,10 @@ public class SelfPlayMatch {
    *
    * @param tally What the games came to.
    * @param pairs The number of pairs the match was to hold.
+   * @param test The hypotheses the games are weighed between, or null if the match held no test.
    */
-  private static void printTally(final Tally tally, final int pairs) {
+  private static void printTally(final Tally tally, final int pairs,
+                                 final MatchStatistics.SequentialTest test) {
     final double points = tally.engineAWins() + tally.draws() / 2.0;
     System.out.println();
     System.out.println("Played: " + tally.played() + " of " + pairs * GAMES_PER_PAIR + " games");
@@ -555,7 +609,9 @@ public class SelfPlayMatch {
               100.0 * points / tally.played());
       final MatchStatistics statistics = new MatchStatistics(tally.engineAWins(),
               tally.engineBWins(), tally.draws());
-      for (final String line : statistics.report(ENGINE_A_NAME)) {
+      final List<String> report = test == null ? statistics.report(ENGINE_A_NAME) :
+              statistics.report(ENGINE_A_NAME, test);
+      for (final String line : report) {
         System.out.println(line);
       }
     }
@@ -613,12 +669,26 @@ public class SelfPlayMatch {
             DEFAULT_DRAW_PLIES + " by default");
     System.out.println("  --draw-after <ply>   the ply a draw may first be given at, " +
             DEFAULT_DRAW_AFTER + " by default");
+    System.out.println("  --sprt               stop the match once the sequential test settles " +
+            "it, off by default");
+    System.out.println("  --elo0 <elo>         the Elo difference the null hypothesis holds, " +
+            DEFAULT_NULL_ELO + " by default");
+    System.out.println("  --elo1 <elo>         the Elo difference the alternative holds, " +
+            DEFAULT_GAIN_ELO + " by default");
+    System.out.println("  --alpha <rate>       the chance of accepting the alternative when the " +
+            "null holds, " + DEFAULT_FALSE_POSITIVE_RATE + " by default");
+    System.out.println("  --beta <rate>        the chance of accepting the null when the " +
+            "alternative holds, " + DEFAULT_FALSE_NEGATIVE_RATE + " by default");
     System.out.println("  --timeout <seconds>  the longest wait for an answer, " +
             DEFAULT_TIMEOUT_SECONDS + " by default");
     System.out.println("  --logs <directory>   where the engine logs are written, " +
             DEFAULT_LOG_DIRECTORY + " by default");
     System.out.println("  --verbose            report every move and the moves of every game");
     System.out.println("  --help               print this message");
+    System.out.println();
+    System.out.println("The sequential test is weighed at the end of a pair, so a match it stops");
+    System.out.println("holds fewer pairs than --pairs asked for. The value of --pairs is the");
+    System.out.println("budget the test is given rather than the number of pairs it will use.");
     System.out.println();
     System.out.println("Engine A plays White in the first game of every pair. An engine command");
     System.out.println("line is one argument. Whitespace inside it separates its arguments except");
@@ -719,6 +789,8 @@ public class SelfPlayMatch {
    * @param drawScore The score a position must be within for a ply to count towards a draw.
    * @param drawPlies The number of consecutive plies within the draw score that draw a game.
    * @param drawAfter The ply a game must have reached before it may be drawn on score.
+   * @param sequentialTest The hypotheses the games are weighed between, or null to play every
+   *                       pair asked for.
    * @param timeoutSeconds The longest an engine may take to answer.
    * @param logDirectory The directory the engine logs are written to.
    * @param verbose True to report every move and the moves of every game.
@@ -727,13 +799,14 @@ public class SelfPlayMatch {
                          long nodeLimitB, int tableSizeMB, String bookPath, int pairs, long seed,
                          int openingIndex, boolean useBook, int plyCap, boolean adjudicate,
                          int resignScore, int resignPlies, int drawScore, int drawPlies,
-                         int drawAfter, long timeoutSeconds, String logDirectory,
-                         boolean verbose) {
+                         int drawAfter, MatchStatistics.SequentialTest sequentialTest,
+                         long timeoutSeconds, String logDirectory, boolean verbose) {
 
     /**
      * Reads settings from command line arguments. The argument --nodes sets the node limit of both
      * engines, and --nodes-a and --nodes-b each set the limit of one engine and override --nodes
-     * whatever order they are given in. Adjudication is on unless --no-adjudication is given.
+     * whatever order they are given in. Adjudication is on unless --no-adjudication is given, and
+     * the sequential test is off unless --sprt is given.
      *
      * @param args The command line arguments, as described by the usage text.
      * @return The settings the arguments describe, or null if they asked for the usage text.
@@ -741,8 +814,10 @@ public class SelfPlayMatch {
      *                                  value that is not a number, if either engine command line
      *                                  is missing, if fewer than one pair is asked for, if
      *                                  arguments naming different openings are given together, if
-     *                                  an adjudication value is out of range, or if an
-     *                                  adjudication value is given with --no-adjudication.
+     *                                  an adjudication value is out of range, if an adjudication
+     *                                  value is given with --no-adjudication, if a sequential
+     *                                  test value is given without --sprt, or if the sequential
+     *                                  test values do not state a test.
      */
     public static Settings read(final String[] args) {
       String engineACommand = null;
@@ -765,6 +840,12 @@ public class SelfPlayMatch {
       int drawPlies = DEFAULT_DRAW_PLIES;
       int drawAfter = DEFAULT_DRAW_AFTER;
       String tuningArgument = null;
+      boolean sprt = false;
+      double nullElo = DEFAULT_NULL_ELO;
+      double gainElo = DEFAULT_GAIN_ELO;
+      double falsePositiveRate = DEFAULT_FALSE_POSITIVE_RATE;
+      double falseNegativeRate = DEFAULT_FALSE_NEGATIVE_RATE;
+      String testArgument = null;
       long timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
       String logDirectory = DEFAULT_LOG_DIRECTORY;
       boolean verbose = false;
@@ -780,6 +861,10 @@ public class SelfPlayMatch {
         }
         if ("--no-adjudication".equals(argument)) {
           adjudicate = false;
+          continue;
+        }
+        if ("--sprt".equals(argument)) {
+          sprt = true;
           continue;
         }
         if ("--verbose".equals(argument)) {
@@ -822,6 +907,22 @@ public class SelfPlayMatch {
             drawAfter = (int) number(value, argument);
             tuningArgument = argument;
           }
+          case "--elo0" -> {
+            nullElo = decimal(value, argument);
+            testArgument = argument;
+          }
+          case "--elo1" -> {
+            gainElo = decimal(value, argument);
+            testArgument = argument;
+          }
+          case "--alpha" -> {
+            falsePositiveRate = decimal(value, argument);
+            testArgument = argument;
+          }
+          case "--beta" -> {
+            falseNegativeRate = decimal(value, argument);
+            testArgument = argument;
+          }
           case "--timeout" -> timeoutSeconds = number(value, argument);
           case "--logs" -> logDirectory = value;
           default -> throw new IllegalArgumentException("Unrecognised argument: " + argument);
@@ -859,12 +960,20 @@ public class SelfPlayMatch {
         throw new IllegalArgumentException("The values of --resign-plies and --draw-plies must " +
                 "be at least one");
       }
+      if (!sprt && testArgument != null) {
+        throw new IllegalArgumentException("The argument " + testArgument + " states the " +
+                "sequential test, so it cannot be given without --sprt");
+      }
+      final MatchStatistics.SequentialTest sequentialTest = sprt ?
+              new MatchStatistics.SequentialTest(nullElo, gainElo, falsePositiveRate,
+                      falseNegativeRate) : null;
       final long shared = nodeLimitBoth == null ? DEFAULT_NODE_LIMIT : nodeLimitBoth;
       final long limitA = nodeLimitA == null ? shared : nodeLimitA;
       final long limitB = nodeLimitB == null ? shared : nodeLimitB;
       return new Settings(engineACommand, engineBCommand, limitA, limitB, tableSizeMB, bookPath,
               pairs, seed, openingIndex, useBook, plyCap, adjudicate, resignScore, resignPlies,
-              drawScore, drawPlies, drawAfter, timeoutSeconds, logDirectory, verbose);
+              drawScore, drawPlies, drawAfter, sequentialTest, timeoutSeconds, logDirectory,
+              verbose);
     }
 
     /**
@@ -894,6 +1003,23 @@ public class SelfPlayMatch {
     private static long number(final String value, final String argument) {
       try {
         return Long.parseLong(value);
+      } catch (final NumberFormatException exception) {
+        throw new IllegalArgumentException("The value of " + argument + " is not a number: " +
+                value);
+      }
+    }
+
+    /**
+     * Reads a decimal number from a command line value.
+     *
+     * @param value The value to read.
+     * @param argument The argument the value follows, used in the fault message.
+     * @return The number the value holds.
+     * @throws IllegalArgumentException If the value is not a decimal number.
+     */
+    private static double decimal(final String value, final String argument) {
+      try {
+        return Double.parseDouble(value);
       } catch (final NumberFormatException exception) {
         throw new IllegalArgumentException("The value of " + argument + " is not a number: " +
                 value);
