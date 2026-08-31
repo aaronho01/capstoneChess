@@ -477,7 +477,7 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Reports what the games of the match came to.
+   * Reports what the games of the match came to and the Elo difference they measure.
    *
    * @param tally What the games came to.
    * @param pairs The number of pairs the match was to hold.
@@ -491,6 +491,11 @@ public class SelfPlayMatch {
     if (tally.played() > 0) {
       System.out.printf("Score for A: %.1f of %d, %.2f percent%n", points, tally.played(),
               100.0 * points / tally.played());
+      final MatchStatistics statistics = new MatchStatistics(tally.engineAWins(),
+              tally.engineBWins(), tally.draws());
+      for (final String line : statistics.report(ENGINE_A_NAME)) {
+        System.out.println(line);
+      }
     }
   }
 
