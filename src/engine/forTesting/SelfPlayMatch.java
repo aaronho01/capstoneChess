@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The SelfPlayMatch class plays a match between two chess engines running as separate processes
@@ -104,6 +106,9 @@ public class SelfPlayMatch {
   /** The seed the book shuffle uses when no other seed is given. */
   private static final long DEFAULT_SEED = 1;
 
+  /** The number of pairs played at once when no other number is given. */
+  private static final int DEFAULT_CONCURRENCY = 1;
+
   /** The number of games played from each opening, one with each engine as White. */
   private static final int GAMES_PER_PAIR = 2;
 
@@ -181,8 +186,11 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Plays every pair of the match on one pair of engine processes, reporting each pair as it ends.
-   * The match stops at the first failure, and the games played before it are still counted.
+   * Plays every pair of the match on a pool of workers, reporting each pair as it ends. Each
+   * worker holds its own pair of engine processes and takes pairs until there are none left, the
+   * sequential test has settled, or a worker has failed. Pairs already being played when the match
+   * stops are played to the end and counted, so a match may hold more pairs than a match of one
+   * worker would.
    *
    * @param settings The settings the match is played under.
    * @param lines The openings the match is played from, each of them played twice.
@@ -198,34 +206,65 @@ public class SelfPlayMatch {
       return new Tally(0, 0, 0, 0, 0, exception.getMessage());
     }
 
+    final int workers = workerCount(settings, lines);
+    final Coordinator coordinator = new Coordinator(lines, settings.sequentialTest());
+    try (ExecutorService pool = Executors.newFixedThreadPool(workers)) {
+      for (int worker = 1; worker <= workers; worker++) {
+        final int number = worker;
+        pool.execute(() -> runWorker(settings, lines, number, workers, commandA, commandB,
+                coordinator));
+      }
+    }
+    return coordinator.tally();
+  }
+
+  /**
+   * Names how many workers a match is played on. A match is never given more workers than it has
+   * pairs, since a worker with no pair to play would still start two engine processes.
+   *
+   * @param settings The settings the match is played under.
+   * @param lines The openings the match is played from.
+   * @return The number of workers the match is played on.
+   */
+  private static int workerCount(final Settings settings, final List<BookLine> lines) {
+    return Math.min(settings.concurrency(), lines.size());
+  }
+
+  /**
+   * Starts one pair of engine processes and plays pairs on them until the coordinator has none
+   * left to give. The processes are started once and reused, so a worker carries out the handshake
+   * and sets the options once however many pairs it plays.
+   *
+   * @param settings The settings the match is played under.
+   * @param lines The openings the match is played from.
+   * @param worker The number of this worker, counting from one.
+   * @param workers The number of workers the match is played on.
+   * @param commandA The command line starting the first engine, already split.
+   * @param commandB The command line starting the second engine, already split.
+   * @param coordinator The coordinator handing out pairs and holding what they came to.
+   */
+  private static void runWorker(final Settings settings, final List<BookLine> lines,
+                                final int worker, final int workers, final List<String> commandA,
+                                final List<String> commandB, final Coordinator coordinator) {
     final Path logDirectory = Path.of(settings.logDirectory());
     final long timeoutMillis = settings.timeoutSeconds() * 1_000L;
-    final Accumulator accumulator = new Accumulator();
-
     try (EngineProcess engineA = new EngineProcess(ENGINE_A_NAME, commandA,
-            logDirectory.resolve("engine-a.log"), timeoutMillis);
+            logDirectory.resolve("engine-a-" + worker + ".log"), timeoutMillis);
          EngineProcess engineB = new EngineProcess(ENGINE_B_NAME, commandB,
-                 logDirectory.resolve("engine-b.log"), timeoutMillis)) {
+                 logDirectory.resolve("engine-b-" + worker + ".log"), timeoutMillis)) {
       prepare(engineA, settings);
       prepare(engineB, settings);
-
-      for (int pair = 0; pair < lines.size(); pair++) {
-        final PairResult result = playPair(settings, pair + 1, lines.get(pair), engineA, engineB);
-        for (final String line : result.report()) {
-          System.out.println(line);
+      while (true) {
+        final int pair = coordinator.nextPair();
+        if (pair < 0) {
+          return;
         }
-        accumulator.add(result);
-        if (result.failure() != null) {
-          return accumulator.tally(result.failure());
-        }
-        if (settled(settings.sequentialTest(), accumulator)) {
-          break;
-        }
+        coordinator.finish(playPair(settings, pair + 1, lines.get(pair), engineA, engineB));
       }
     } catch (final EngineProcess.Fault fault) {
-      return accumulator.tally(fault.getMessage());
+      coordinator.fail(workers == 1 ? fault.getMessage() :
+              "on worker " + worker + ", " + fault.getMessage());
     }
-    return accumulator.tally(null);
   }
 
   /**
@@ -530,6 +569,9 @@ public class SelfPlayMatch {
     System.out.println("Games: " + lines.size() * GAMES_PER_PAIR + " over " + lines.size() +
             " pairs, ply cap " + settings.plyCap() + ", timeout " + settings.timeoutSeconds() +
             "s");
+    final int workers = workerCount(settings, lines);
+    System.out.println("Workers: " + workers + " pairs at once, " + workers * 2 +
+            " engine processes, " + workers * 2 * settings.tableSizeMB() + " MB of hash in total");
     if (settings.adjudicate()) {
       System.out.println("Adjudication: a win at " + settings.resignScore() + " over " +
               settings.resignPlies() + " plies, a draw within " + settings.drawScore() + " over " +
@@ -678,6 +720,8 @@ public class SelfPlayMatch {
             "the colours reversed, " + DEFAULT_PAIRS + " by default");
     System.out.println("  --seed <number>      the seed the book shuffle uses, " + DEFAULT_SEED +
             " by default");
+    System.out.println("  --concurrency <n>    pairs played at once, " + DEFAULT_CONCURRENCY +
+            " by default");
     System.out.println("  --opening <index>    play only this book line, as one pair");
     System.out.println("  --nobook             play from the standard starting position");
     System.out.println("  --nodes <count>      nodes per move for both engines, " +
@@ -723,6 +767,11 @@ public class SelfPlayMatch {
     System.out.println("The sequential test is weighed at the end of a pair, so a match it stops");
     System.out.println("holds fewer pairs than --pairs asked for. The value of --pairs is the");
     System.out.println("budget the test is given rather than the number of pairs it will use.");
+    System.out.println();
+    System.out.println("A pair already being played when the match stops is played to the end and");
+    System.out.println("counted, so a match on several workers may hold more pairs than the same");
+    System.out.println("match on one. Each worker holds two engine processes and each process");
+    System.out.println("holds its own hash, so --concurrency multiplies the memory a match needs.");
     System.out.println();
     System.out.println("Engine A plays White in the first game of every pair. An engine command");
     System.out.println("line is one argument. Whitespace inside it separates its arguments except");
@@ -791,7 +840,6 @@ public class SelfPlayMatch {
                       String failure) {
   }
 
-
   /**
    * The PairResult record holds what the games of one pair came to and the lines reporting them.
    *
@@ -853,6 +901,98 @@ public class SelfPlayMatch {
   }
 
   /**
+   * The Coordinator class hands pairs out to the workers of a match and holds what they came to.
+   * Every method is synchronised, so a pair is reported and counted as one step and the lines of
+   * two pairs never interleave.
+   */
+  private static final class Coordinator {
+
+    /** The openings the match is played from, one for each pair. */
+    private final List<BookLine> lines;
+
+    /** The hypotheses the games are weighed between, or null if the match holds no test. */
+    private final MatchStatistics.SequentialTest test;
+
+    /** What the pairs finished so far have come to. */
+    private final Accumulator accumulator = new Accumulator();
+
+    /** The next pair to hand out. */
+    private int cursor;
+
+    /** What stopped the match, or null if nothing has. */
+    private String failure;
+
+    /** True once no further pair is to be handed out. */
+    private boolean stopped;
+
+    /**
+     * Constructs a coordinator over the pairs of a match.
+     *
+     * @param lines The openings the match is played from, one for each pair.
+     * @param test The hypotheses the games are weighed between, or null if the match holds no
+     *             test.
+     */
+    private Coordinator(final List<BookLine> lines, final MatchStatistics.SequentialTest test) {
+      this.lines = lines;
+      this.test = test;
+    }
+
+    /**
+     * Hands out the next pair to play.
+     *
+     * @return The position of the next opening in the list of lines, or minus one if the match
+     *         holds no further pair to play.
+     */
+    private synchronized int nextPair() {
+      if (this.stopped || this.cursor >= this.lines.size()) {
+        return -1;
+      }
+      return this.cursor++;
+    }
+
+    /**
+     * Reports one finished pair, counts its games, and weighs the sequential test on the games
+     * counted so far.
+     *
+     * @param result What the games of the pair came to and the lines reporting them.
+     */
+    private synchronized void finish(final PairResult result) {
+      for (final String line : result.report()) {
+        System.out.println(line);
+      }
+      this.accumulator.add(result);
+      if (result.failure() != null) {
+        fail(result.failure());
+        return;
+      }
+      if (settled(this.test, this.accumulator)) {
+        this.stopped = true;
+      }
+    }
+
+    /**
+     * Stops the match, keeping the first failure reported if more than one worker fails.
+     *
+     * @param message What stopped the match.
+     */
+    private synchronized void fail(final String message) {
+      if (this.failure == null) {
+        this.failure = message;
+      }
+      this.stopped = true;
+    }
+
+    /**
+     * Names what the pairs of the match came to.
+     *
+     * @return The tally the match is reported from.
+     */
+    private synchronized Tally tally() {
+      return this.accumulator.tally(this.failure);
+    }
+  }
+
+  /**
    * The BookLine record pairs an opening with the place it was read from in the book.
    *
    * @param index The position of the opening in the book, or minus one for the standard starting
@@ -886,6 +1026,7 @@ public class SelfPlayMatch {
    * @param drawAfter The ply a game must have reached before it may be drawn on score.
    * @param sequentialTest The hypotheses the games are weighed between, or null to play every
    *                       pair asked for.
+   * @param concurrency The number of pairs played at once.
    * @param timeoutSeconds The longest an engine may take to answer.
    * @param logDirectory The directory the engine logs are written to.
    * @param verbose True to report every move and the moves of every game.
@@ -895,7 +1036,8 @@ public class SelfPlayMatch {
                          int openingIndex, boolean useBook, int plyCap, boolean adjudicate,
                          int resignScore, int resignPlies, int drawScore, int drawPlies,
                          int drawAfter, MatchStatistics.SequentialTest sequentialTest,
-                         long timeoutSeconds, String logDirectory, boolean verbose) {
+                         int concurrency, long timeoutSeconds, String logDirectory,
+                         boolean verbose) {
 
     /**
      * Reads settings from command line arguments. The argument --nodes sets the node limit of both
@@ -910,7 +1052,8 @@ public class SelfPlayMatch {
      *                                  is missing, if fewer than one pair is asked for, if
      *                                  arguments naming different openings are given together, if
      *                                  an adjudication value is out of range, if an adjudication
-     *                                  value is given with --no-adjudication, if a sequential
+     *                                  value is given with --no-adjudication, if fewer than one
+     *                                  pair is played at once, if a sequential
      *                                  test value is given without --sprt, or if the sequential
      *                                  test values do not state a test.
      */
@@ -941,6 +1084,7 @@ public class SelfPlayMatch {
       double falsePositiveRate = DEFAULT_FALSE_POSITIVE_RATE;
       double falseNegativeRate = DEFAULT_FALSE_NEGATIVE_RATE;
       String testArgument = null;
+      int concurrency = DEFAULT_CONCURRENCY;
       long timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
       String logDirectory = DEFAULT_LOG_DIRECTORY;
       boolean verbose = false;
@@ -1018,6 +1162,7 @@ public class SelfPlayMatch {
             falseNegativeRate = decimal(value, argument);
             testArgument = argument;
           }
+          case "--concurrency" -> concurrency = (int) number(value, argument);
           case "--timeout" -> timeoutSeconds = number(value, argument);
           case "--logs" -> logDirectory = value;
           default -> throw new IllegalArgumentException("Unrecognised argument: " + argument);
@@ -1031,6 +1176,9 @@ public class SelfPlayMatch {
       }
       if (pairs < 1) {
         throw new IllegalArgumentException("The value of --pairs must be at least one");
+      }
+      if (concurrency < 1) {
+        throw new IllegalArgumentException("The value of --concurrency must be at least one");
       }
       if (openingIndex >= 0) {
         if (!useBook) {
@@ -1067,8 +1215,8 @@ public class SelfPlayMatch {
       final long limitB = nodeLimitB == null ? shared : nodeLimitB;
       return new Settings(engineACommand, engineBCommand, limitA, limitB, tableSizeMB, bookPath,
               pairs, seed, openingIndex, useBook, plyCap, adjudicate, resignScore, resignPlies,
-              drawScore, drawPlies, drawAfter, sequentialTest, timeoutSeconds, logDirectory,
-              verbose);
+              drawScore, drawPlies, drawAfter, sequentialTest, concurrency, timeoutSeconds,
+              logDirectory, verbose);
     }
 
     /**
