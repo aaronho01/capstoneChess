@@ -176,8 +176,11 @@ public class SelfPlayMatch {
     }
 
     printHeader(settings, lines);
+    final long start = System.nanoTime();
     final Tally tally = runMatch(settings, lines);
-    printTally(tally, lines.size(), settings.sequentialTest());
+    final long elapsedMillis = (System.nanoTime() - start) / 1_000_000L;
+    printTally(tally, lines.size(), workerCount(settings, lines), elapsedMillis,
+            settings.sequentialTest());
     if (tally.failure() != null) {
       System.out.println();
       System.out.println("The match stopped: " + tally.failure());
@@ -203,7 +206,8 @@ public class SelfPlayMatch {
       commandA = EngineProcess.tokenize(settings.engineACommand());
       commandB = EngineProcess.tokenize(settings.engineBCommand());
     } catch (final IllegalArgumentException exception) {
-      return new Tally(0, 0, 0, 0, 0, exception.getMessage());
+      return new Tally(0, 0, 0, 0, 0, new SearchTotals(), new SearchTotals(), 0,
+              exception.getMessage());
     }
 
     final int workers = workerCount(settings, lines);
@@ -283,11 +287,14 @@ public class SelfPlayMatch {
                                      final EngineProcess engineA, final EngineProcess engineB) {
     final List<String> report = new ArrayList<>();
     reportPair(report, pair, line);
+    final SearchTotals totalsA = new SearchTotals();
+    final SearchTotals totalsB = new SearchTotals();
     int engineAWins = 0;
     int engineBWins = 0;
     int draws = 0;
     int played = 0;
     int adjudicated = 0;
+    long gameMillis = 0;
 
     for (int game = 0; game < GAMES_PER_PAIR; game++) {
       final boolean engineAIsWhite = game == 0;
@@ -295,14 +302,19 @@ public class SelfPlayMatch {
       final EngineProcess black = engineAIsWhite ? engineB : engineA;
       final long whiteNodeLimit = engineAIsWhite ? settings.nodeLimitA() : settings.nodeLimitB();
       final long blackNodeLimit = engineAIsWhite ? settings.nodeLimitB() : settings.nodeLimitA();
+      final SearchTotals whiteTotals = engineAIsWhite ? totalsA : totalsB;
+      final SearchTotals blackTotals = engineAIsWhite ? totalsB : totalsA;
+      final long start = System.nanoTime();
       final Result result = play(settings, line.opening(), white, black, whiteNodeLimit,
-              blackNodeLimit, report);
-      reportGame(report, game + 1, engineAIsWhite, result, settings.verbose());
+              blackNodeLimit, whiteTotals, blackTotals, report);
+      final long elapsedMillis = (System.nanoTime() - start) / 1_000_000L;
+      reportGame(report, game + 1, engineAIsWhite, result, elapsedMillis, settings.verbose());
       if (result.outcome() == Outcome.FAILURE) {
-        return new PairResult(engineAWins, engineBWins, draws, played, adjudicated,
-                result.reason(), report);
+        return new PairResult(engineAWins, engineBWins, draws, played, adjudicated, totalsA,
+                totalsB, gameMillis, result.reason(), report);
       }
       played++;
+      gameMillis += elapsedMillis;
       if (result.adjudicated()) {
         adjudicated++;
       }
@@ -314,7 +326,8 @@ public class SelfPlayMatch {
         engineBWins++;
       }
     }
-    return new PairResult(engineAWins, engineBWins, draws, played, adjudicated, null, report);
+    return new PairResult(engineAWins, engineBWins, draws, played, adjudicated, totalsA, totalsB,
+            gameMillis, null, report);
   }
 
   /**
@@ -348,6 +361,8 @@ public class SelfPlayMatch {
    * @param black The engine playing Black.
    * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
    * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
+   * @param whiteTotals The totals the searches White carries out are folded into.
+   * @param blackTotals The totals the searches Black carries out are folded into.
    * @param report The lines reporting the pair, which this method appends to when the match is
    *               verbose.
    * @return The outcome of the game, why it ended, and the moves it held.
@@ -355,6 +370,7 @@ public class SelfPlayMatch {
   public static Result play(final Settings settings, final OpeningBook.Opening opening,
                             final EngineProcess white, final EngineProcess black,
                             final long whiteNodeLimit, final long blackNodeLimit,
+                            final SearchTotals whiteTotals, final SearchTotals blackTotals,
                             final List<String> report) {
     final List<String> moves = new ArrayList<>();
     final Board board = opening == null ? Board.createStandardBoard() : OpeningBook.play(opening);
@@ -365,7 +381,7 @@ public class SelfPlayMatch {
       white.newGame();
       black.newGame();
       return playMoves(settings, board, moves, white, black, whiteNodeLimit, blackNodeLimit,
-              report);
+              whiteTotals, blackTotals, report);
     } catch (final EngineProcess.Fault fault) {
       return new Result(Outcome.FAILURE, fault.getMessage(), moves);
     }
@@ -395,6 +411,8 @@ public class SelfPlayMatch {
    * @param black The engine playing Black.
    * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
    * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
+   * @param whiteTotals The totals the searches White carries out are folded into.
+   * @param blackTotals The totals the searches Black carries out are folded into.
    * @param report The lines reporting the pair, which this method appends to when the match is
    *               verbose.
    * @return The outcome of the game, why it ended, and the moves it held.
@@ -403,7 +421,8 @@ public class SelfPlayMatch {
   private static Result playMoves(final Settings settings, final Board board,
                                   final List<String> moves, final EngineProcess white,
                                   final EngineProcess black, final long whiteNodeLimit,
-                                  final long blackNodeLimit, final List<String> report) {
+                                  final long blackNodeLimit, final SearchTotals whiteTotals,
+                                  final SearchTotals blackTotals, final List<String> report) {
     final Adjudicator adjudicator = new Adjudicator(settings.adjudicate(),
             settings.resignScore(), settings.resignPlies(), settings.drawScore(),
             settings.drawPlies(), settings.drawAfter());
@@ -439,6 +458,7 @@ public class SelfPlayMatch {
       }
       board.makeMove(move);
       moves.add(reply.move());
+      (whiteToMove ? whiteTotals : blackTotals).add(reply);
       if (settings.verbose()) {
         reportMove(report, moves.size(), whiteToMove, reply);
       }
@@ -614,14 +634,15 @@ public class SelfPlayMatch {
    * @param game The number of the game within its pair, counting from one.
    * @param engineAIsWhite True if engine A played White.
    * @param result How the game ended.
+   * @param elapsedMillis The time the game took, in milliseconds.
    * @param verbose True to report the moves the game held.
    */
   private static void reportGame(final List<String> report, final int game,
                                  final boolean engineAIsWhite, final Result result,
-                                 final boolean verbose) {
-    report.add(String.format("  game %d  White %s  %-7s  %3d plies  %s", game,
+                                 final long elapsedMillis, final boolean verbose) {
+    report.add(String.format("  game %d  White %s  %-7s  %3d plies  %7.1fs  %s", game,
             engineAIsWhite ? ENGINE_A_NAME : ENGINE_B_NAME, scoreOf(result.outcome()),
-            result.moves().size(), result.reason()));
+            result.moves().size(), elapsedMillis / 1000.0, result.reason()));
     if (verbose) {
       report.add("  moves: " + String.join(" ", result.moves()));
     }
@@ -638,8 +659,9 @@ public class SelfPlayMatch {
    */
   private static void reportMove(final List<String> report, final int ply,
                                  final boolean whiteMoved, final EngineProcess.Reply reply) {
-    report.add(String.format("%6d  %s  %-6s  %9s  %7.2fs", ply, whiteMoved ? "W" : "B",
-            reply.move(), scoreText(reply, whiteMoved), reply.elapsedMillis() / 1000.0));
+    report.add(String.format("%6d  %s  %-6s  %4s  %9s  %7.2fs", ply, whiteMoved ? "W" : "B",
+            reply.move(), reply.depth() == null ? "-" : String.valueOf(reply.depth()),
+            scoreText(reply, whiteMoved), reply.elapsedMillis() / 1000.0));
   }
 
   /**
@@ -663,13 +685,19 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Reports what the games of the match came to and the Elo difference they measure.
+   * Reports what the games of the match came to and the Elo difference they measure. The mean time
+   * a game took is reported alongside the number of pairs played at once, since a game played
+   * beside others shares the machine with them and is only comparable with a game timed the same
+   * way.
    *
    * @param tally What the games came to.
    * @param pairs The number of pairs the match was to hold.
+   * @param workers The number of pairs the match played at once.
+   * @param elapsedMillis The time the whole match took, in milliseconds.
    * @param test The hypotheses the games are weighed between, or null if the match held no test.
    */
-  private static void printTally(final Tally tally, final int pairs,
+  private static void printTally(final Tally tally, final int pairs, final int workers,
+                                 final long elapsedMillis,
                                  final MatchStatistics.SequentialTest test) {
     final double points = tally.engineAWins() + tally.draws() / 2.0;
     System.out.println();
@@ -683,6 +711,7 @@ public class SelfPlayMatch {
     if (tally.played() > 0) {
       System.out.printf("Score for A: %.1f of %d, %.2f percent%n", points, tally.played(),
               100.0 * points / tally.played());
+      printSearchTotals(tally, elapsedMillis, workers);
       final MatchStatistics statistics = new MatchStatistics(tally.engineAWins(),
               tally.engineBWins(), tally.draws());
       final List<String> report = test == null ? statistics.report(ENGINE_A_NAME) :
@@ -691,6 +720,53 @@ public class SelfPlayMatch {
         System.out.println(line);
       }
     }
+  }
+
+  /**
+   * Reports the mean depth of the searches each engine carried out, the mean time a game took, and
+   * the time the whole match took. The mean time counts only the games that reached a result,
+   * while the time the match took holds everything the match did.
+   *
+   * @param tally What the games came to.
+   * @param elapsedMillis The time the whole match took, in milliseconds.
+   * @param workers The number of pairs the match played at once.
+   */
+  private static void printSearchTotals(final Tally tally, final long elapsedMillis,
+                                        final int workers) {
+    System.out.println("Mean depth: " + ENGINE_A_NAME + " " + depthText(tally.engineATotals()) +
+            ", " + ENGINE_B_NAME + " " + depthText(tally.engineBTotals()) + ", over " +
+            tally.engineATotals().searches() + " and " + tally.engineBTotals().searches() +
+            " searches");
+    System.out.println("Mean time: " + timeText(tally.gameMillis() / tally.played()) +
+            " per game, " + timeText(elapsedMillis) + " in total, at " + workers +
+            (workers == 1 ? " pair" : " pairs") + " at once");
+  }
+
+  /**
+   * Names the mean depth of a set of searches.
+   *
+   * @param totals What the searches came to.
+   * @return The mean depth, or a dash if no search reported a depth.
+   */
+  private static String depthText(final SearchTotals totals) {
+    return totals.depthSearches() == 0 ? "-" : String.format("%.2f", totals.meanDepth());
+  }
+
+  /**
+   * Names a length of time, in hours, minutes and seconds as far as it reaches.
+   *
+   * @param millis The length of time, in milliseconds.
+   * @return The length of time written out.
+   */
+  private static String timeText(final long millis) {
+    final long seconds = Math.round(millis / 1000.0);
+    if (seconds >= 3600) {
+      return String.format("%dh %02dm %02ds", seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    }
+    if (seconds >= 60) {
+      return String.format("%dm %02ds", seconds / 60, seconds % 60);
+    }
+    return String.format("%.1fs", millis / 1000.0);
   }
 
   /**
@@ -834,9 +910,13 @@ public class SelfPlayMatch {
    * @param draws The games neither engine won.
    * @param played The games that reached a result.
    * @param adjudicated The games that ended on the reported scores rather than on the board.
+   * @param engineATotals What the searches of the first engine came to.
+   * @param engineBTotals What the searches of the second engine came to.
+   * @param gameMillis The time the games that reached a result took, in milliseconds, summed.
    * @param failure What stopped the match, or null if every game reached a result.
    */
   public record Tally(int engineAWins, int engineBWins, int draws, int played, int adjudicated,
+                      SearchTotals engineATotals, SearchTotals engineBTotals, long gameMillis,
                       String failure) {
   }
 
@@ -848,11 +928,84 @@ public class SelfPlayMatch {
    * @param draws The games neither engine won.
    * @param played The games that reached a result.
    * @param adjudicated The games that ended on the reported scores rather than on the board.
+   * @param engineATotals What the searches of the first engine came to.
+   * @param engineBTotals What the searches of the second engine came to.
+   * @param gameMillis The time the games that reached a result took, in milliseconds, summed.
    * @param failure What stopped the pair, or null if both games reached a result.
    * @param report The lines reporting the pair, in the order they are written out.
    */
   private record PairResult(int engineAWins, int engineBWins, int draws, int played,
-                            int adjudicated, String failure, List<String> report) {
+                            int adjudicated, SearchTotals engineATotals,
+                            SearchTotals engineBTotals, long gameMillis, String failure,
+                            List<String> report) {
+  }
+
+  /**
+   * The SearchTotals class holds the depths a set of searches by one engine reached. A search
+   * reporting no depth is counted and left out of the depth, so a mean depth is a mean over the
+   * searches that reported one.
+   */
+  public static final class SearchTotals {
+
+    /** The searches folded in. */
+    private int searches;
+
+    /** The searches folded in that reported a depth. */
+    private int depthSearches;
+
+    /** The depths those searches reported, summed. */
+    private long depth;
+
+    /**
+     * Folds one search into the totals.
+     *
+     * @param reply What the engine reported for the search.
+     */
+    private void add(final EngineProcess.Reply reply) {
+      this.searches++;
+      if (reply.depth() != null) {
+        this.depthSearches++;
+        this.depth += reply.depth();
+      }
+    }
+
+    /**
+     * Folds another set of totals into these.
+     *
+     * @param other What the other searches came to.
+     */
+    private void add(final SearchTotals other) {
+      this.searches += other.searches;
+      this.depthSearches += other.depthSearches;
+      this.depth += other.depth;
+    }
+
+    /**
+     * Returns the number of searches folded in.
+     *
+     * @return The searches folded in.
+     */
+    public int searches() {
+      return this.searches;
+    }
+
+    /**
+     * Returns the number of searches folded in that reported a depth.
+     *
+     * @return The searches folded in that reported a depth.
+     */
+    public int depthSearches() {
+      return this.depthSearches;
+    }
+
+    /**
+     * Returns the mean depth of the searches that reported one.
+     *
+     * @return The mean depth, or zero if no search reported a depth.
+     */
+    public double meanDepth() {
+      return this.depthSearches == 0 ? 0 : (double) this.depth / this.depthSearches;
+    }
   }
 
   /**
@@ -875,6 +1028,15 @@ public class SelfPlayMatch {
     /** The games that ended on the reported scores rather than on the board. */
     private int adjudicated;
 
+    /** What the searches of the first engine have come to. */
+    private final SearchTotals engineATotals = new SearchTotals();
+
+    /** What the searches of the second engine have come to. */
+    private final SearchTotals engineBTotals = new SearchTotals();
+
+    /** The time the games that reached a result took, in milliseconds, summed. */
+    private long gameMillis;
+
     /**
      * Folds the games of one pair into the running count.
      *
@@ -886,6 +1048,9 @@ public class SelfPlayMatch {
       this.draws += result.draws();
       this.played += result.played();
       this.adjudicated += result.adjudicated();
+      this.engineATotals.add(result.engineATotals());
+      this.engineBTotals.add(result.engineBTotals());
+      this.gameMillis += result.gameMillis();
     }
 
     /**
@@ -896,7 +1061,7 @@ public class SelfPlayMatch {
      */
     private Tally tally(final String failure) {
       return new Tally(this.engineAWins, this.engineBWins, this.draws, this.played,
-              this.adjudicated, failure);
+              this.adjudicated, this.engineATotals, this.engineBTotals, this.gameMillis, failure);
     }
   }
 
