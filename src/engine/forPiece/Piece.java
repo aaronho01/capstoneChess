@@ -132,17 +132,34 @@ public abstract class Piece {
   public abstract Collection < Move > calculateLegalMoves(final Board board);
 
   /**
+   * Determines whether this piece bears on the given square on the given board, without
+   * allocating any {@link Move} objects. Whatever occupies the target square is disregarded, so
+   * a square held by a piece of this piece's own alliance is still defended. A sliding piece is
+   * blocked by any piece standing strictly between it and the target square.
+   *
+   * @param targetSquare The square to test.
+   * @param board The current board.
+   * @return True if this piece defends targetSquare, false otherwise.
+   */
+  public abstract boolean defendsSquare(final int targetSquare, final Board board);
+
+  /**
    * Determines whether this piece attacks the given square on the given board, without
-   * allocating any {@link Move} objects. This mirrors exactly the destinations {@link
-   * #calculateLegalMoves(Board)} would produce for this piece, but stops as soon as the target
-   * square is confirmed or ruled out, so it is far cheaper than generating and filtering the
-   * full move list when only one square's status is in question.
+   * allocating any {@link Move} objects. A defended square is attacked unless a piece of this
+   * piece's own alliance stands on it, so this mirrors exactly the destinations {@link
+   * #calculateLegalMoves(Board)} would produce for this piece.
    *
    * @param targetSquare The square to test.
    * @param board The current board.
    * @return True if this piece attacks targetSquare, false otherwise.
    */
-  public abstract boolean attacksSquare(final int targetSquare, final Board board);
+  public boolean attacksSquare(final int targetSquare, final Board board) {
+    if (!defendsSquare(targetSquare, board)) {
+      return false;
+    }
+    final Piece pieceAtTarget = board.getPiece(targetSquare);
+    return pieceAtTarget == null || pieceAtTarget.getPieceAllegiance() != this.pieceAlliance;
+  }
 
   /**
    * Overrides the `equals` method to compare two pieces for equality.

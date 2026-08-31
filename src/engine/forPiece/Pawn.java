@@ -179,17 +179,15 @@ public final class Pawn extends Piece {
   }
 
   /**
-   * Determines whether this pawn attacks the given square. Unlike {@link
-   * #calculateLegalMoves(Board)}, occupancy of the target square is irrelevant here: a pawn
-   * guards its diagonal squares whether or not anything is standing on them, which matters for
-   * king safety and castling even though no move gets generated onto an empty diagonal square.
+   * Determines whether this pawn bears on the given square, which is either of the two squares
+   * diagonally ahead of it. Occupancy of the target square is disregarded.
    *
    * @param targetSquare The square to test.
    * @param board The current board.
-   * @return True if this pawn attacks targetSquare, false otherwise.
+   * @return True if this pawn defends targetSquare, false otherwise.
    */
   @Override
-  public boolean attacksSquare(final int targetSquare, final Board board) {
+  public boolean defendsSquare(final int targetSquare, final Board board) {
     final int candidateSeven = this.piecePosition + (this.pieceAlliance.getDirection() * 7);
     if (candidateSeven == targetSquare && BoardUtils.isValidTileCoordinate(candidateSeven) &&
             !((BoardUtils.Instance.EighthColumn.get(this.piecePosition) && this.pieceAlliance.isWhite()) ||

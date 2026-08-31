@@ -166,15 +166,16 @@ public final class King extends Piece {
   }
 
   /**
-   * Determines whether this king attacks the given square, using the same precomputed
-   * offsets as {@link #calculateLegalMoves(Board)} but without allocating any moves.
+   * Determines whether this king bears on the given square, using the same precomputed
+   * offsets as {@link #calculateLegalMoves(Board)} but without allocating any moves. Occupancy
+   * of the target square is disregarded.
    *
    * @param targetSquare The square to test.
    * @param board The current board.
-   * @return True if this king attacks targetSquare, false otherwise.
+   * @return True if this king defends targetSquare, false otherwise.
    */
   @Override
-  public boolean attacksSquare(final int targetSquare, final Board board) {
+  public boolean defendsSquare(final int targetSquare, final Board board) {
     final int[] candidates = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
     if (candidates == null) {
       return false;
@@ -182,8 +183,7 @@ public final class King extends Piece {
     for (final int currentCandidateOffset : candidates) {
       final int candidateDestinationCoordinate = this.piecePosition + currentCandidateOffset;
       if (candidateDestinationCoordinate == targetSquare) {
-        final Piece pieceAtDestination = board.getPiece(targetSquare);
-        return pieceAtDestination == null || pieceAtDestination.getPieceAllegiance() != this.pieceAlliance;
+        return true;
       }
     }
     return false;

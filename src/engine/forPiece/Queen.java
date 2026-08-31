@@ -124,30 +124,27 @@ public final class Queen extends Piece {
   }
 
   /**
-   * Determines whether this queen attacks the given square, walking the same precomputed
-   * lines as {@link #calculateLegalMoves(Board)} but without allocating any moves.
+   * Determines whether this queen bears on the given square, walking the same precomputed
+   * lines as {@link #calculateLegalMoves(Board)} but without allocating any moves. Occupancy of
+   * the target square is disregarded, while any piece standing strictly between this queen and
+   * the target square blocks the line.
    *
    * @param targetSquare The square to test.
    * @param board The current board.
-   * @return True if this queen attacks targetSquare, false otherwise.
+   * @return True if this queen defends targetSquare, false otherwise.
    */
   @Override
-  public boolean attacksSquare(final int targetSquare, final Board board) {
+  public boolean defendsSquare(final int targetSquare, final Board board) {
     final MoveUtils.Line[] lines = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
     if (lines == null) {
       return false;
     }
     for (final MoveUtils.Line line : lines) {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
-        final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
-        if (pieceAtDestination == null) {
-          if (candidateDestinationCoordinate == targetSquare) {
-            return true;
-          }
-        } else {
-          if (candidateDestinationCoordinate == targetSquare) {
-            return pieceAtDestination.getPieceAllegiance() != this.pieceAlliance;
-          }
+        if (candidateDestinationCoordinate == targetSquare) {
+          return true;
+        }
+        if (board.getPiece(candidateDestinationCoordinate) != null) {
           break;
         }
       }
