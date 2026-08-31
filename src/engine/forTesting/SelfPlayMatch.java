@@ -443,7 +443,8 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Reports one move as it is played.
+   * Reports one move as it is played. The score column holds the score from White's point of
+   * view, not from the point of view of the engine that reported it.
    *
    * @param ply The number of the ply just played, counting the moves of the opening.
    * @param whiteMoved True if White played the move.
@@ -452,22 +453,25 @@ public class SelfPlayMatch {
   private static void printMove(final int ply, final boolean whiteMoved,
                                 final EngineProcess.Reply reply) {
     System.out.printf("%6d  %s  %-6s  %9s  %7.2fs%n", ply, whiteMoved ? "W" : "B", reply.move(),
-            scoreText(reply), reply.elapsedMillis() / 1000.0);
+            scoreText(reply, whiteMoved), reply.elapsedMillis() / 1000.0);
   }
 
   /**
-   * Names what an engine reported about the position it moved from.
+   * Names what an engine reported about the position it moved from, written from White's point
+   * of view. Engines report scores from the point of view of the side to move, so a score
+   * reported with a Black move is negated here.
    *
    * @param reply What the engine reported.
+   * @param whiteMoved True if White played the move the score was reported with.
    * @return The distance to mate, the score in centipawns, or a dash if the engine reported
-   *         neither.
+   *         neither, each from White's point of view.
    */
-  private static String scoreText(final EngineProcess.Reply reply) {
+  private static String scoreText(final EngineProcess.Reply reply, final boolean whiteMoved) {
     if (reply.mateIn() != null) {
-      return "mate " + reply.mateIn();
+      return "mate " + (whiteMoved ? reply.mateIn() : -reply.mateIn());
     }
     if (reply.score() != null) {
-      return "cp " + reply.score();
+      return "cp " + (whiteMoved ? reply.score() : -reply.score());
     }
     return "-";
   }
