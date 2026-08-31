@@ -37,6 +37,11 @@ import java.util.Random;
  * equal effort while one thread is searching, since helper threads contribute nodes that the limit
  * does not account for.
  * <p>
+ * A game that the engines agree is decided, or agree is level, is adjudicated rather than played
+ * out, on the rules {@link Adjudicator} holds. A position that has already ended is judged on the
+ * board before it is judged on the scores, so a checkmate is a checkmate rather than an
+ * adjudicated win.
+ * <p>
  * The arbiter uses the move generation of the build it was compiled from, not that of either
  * engine, so a move generation fault shared by both engines would be invisible here. That is what
  * {@link PerftSuite} covers.
@@ -53,6 +58,21 @@ public class SelfPlayMatch {
 
   /** The largest number of plies a game may reach before it is stopped, when no other cap is given. */
   private static final int DEFAULT_PLY_CAP = 300;
+
+  /** The score a side must be ahead by for a ply to count towards a win, by default. */
+  private static final int DEFAULT_RESIGN_SCORE = 800;
+
+  /** The number of consecutive plies at the resign score that win a game, by default. */
+  private static final int DEFAULT_RESIGN_PLIES = 8;
+
+  /** The score a position must be within for a ply to count towards a draw, by default. */
+  private static final int DEFAULT_DRAW_SCORE = 10;
+
+  /** The number of consecutive plies within the draw score that draw a game, by default. */
+  private static final int DEFAULT_DRAW_PLIES = 8;
+
+  /** The ply a game must have reached before it may be drawn on score, by default. */
+  private static final int DEFAULT_DRAW_AFTER = 80;
 
   /** The time an engine is allowed to take to answer, in seconds, when no other time is given. */
   private static final long DEFAULT_TIMEOUT_SECONDS = 60;
@@ -157,7 +177,7 @@ public class SelfPlayMatch {
       commandA = EngineProcess.tokenize(settings.engineACommand());
       commandB = EngineProcess.tokenize(settings.engineBCommand());
     } catch (final IllegalArgumentException exception) {
-      return new Tally(0, 0, 0, 0, exception.getMessage());
+      return new Tally(0, 0, 0, 0, 0, exception.getMessage());
     }
 
     final Path logDirectory = Path.of(settings.logDirectory());
@@ -166,6 +186,7 @@ public class SelfPlayMatch {
     int engineBWins = 0;
     int draws = 0;
     int played = 0;
+    int adjudicated = 0;
 
     try (EngineProcess engineA = new EngineProcess(ENGINE_A_NAME, commandA,
             logDirectory.resolve("engine-a.log"), timeoutMillis);
@@ -189,9 +210,13 @@ public class SelfPlayMatch {
                   blackNodeLimit);
           printGame(game + 1, engineAIsWhite, result, settings.verbose());
           if (result.outcome() == Outcome.FAILURE) {
-            return new Tally(engineAWins, engineBWins, draws, played, result.reason());
+            return new Tally(engineAWins, engineBWins, draws, played, adjudicated,
+                    result.reason());
           }
           played++;
+          if (result.adjudicated()) {
+            adjudicated++;
+          }
           if (result.outcome() == Outcome.DRAW) {
             draws++;
           } else if ((result.outcome() == Outcome.WHITE_WINS) == engineAIsWhite) {
@@ -202,9 +227,9 @@ public class SelfPlayMatch {
         }
       }
     } catch (final EngineProcess.Fault fault) {
-      return new Tally(engineAWins, engineBWins, draws, played, fault.getMessage());
+      return new Tally(engineAWins, engineBWins, draws, played, adjudicated, fault.getMessage());
     }
-    return new Tally(engineAWins, engineBWins, draws, played, null);
+    return new Tally(engineAWins, engineBWins, draws, played, adjudicated, null);
   }
 
   /**
@@ -267,10 +292,18 @@ public class SelfPlayMatch {
                                   final List<String> moves, final EngineProcess white,
                                   final EngineProcess black, final long whiteNodeLimit,
                                   final long blackNodeLimit) {
+    final Adjudicator adjudicator = new Adjudicator(settings.adjudicate(),
+            settings.resignScore(), settings.resignPlies(), settings.drawScore(),
+            settings.drawPlies(), settings.drawAfter());
+    Adjudicator.Verdict verdict = Adjudicator.Verdict.NONE;
+
     while (true) {
       final Result terminal = terminalResult(board, moves);
       if (terminal != null) {
         return terminal;
+      }
+      if (verdict != Adjudicator.Verdict.NONE) {
+        return new Result(outcomeOf(verdict), verdict.getReason(), moves, true);
       }
       if (moves.size() >= settings.plyCap()) {
         return new Result(Outcome.DRAW, "the ply cap of " + settings.plyCap() + " was reached",
@@ -297,7 +330,25 @@ public class SelfPlayMatch {
       if (settings.verbose()) {
         printMove(moves.size(), whiteToMove, reply);
       }
+      verdict = adjudicator.judge(reply, whiteToMove, moves.size());
     }
+  }
+
+  /**
+   * Names the outcome a verdict awards.
+   *
+   * @param verdict What the reported scores settled.
+   * @return The outcome of the game.
+   * @throws IllegalArgumentException If the verdict settled nothing.
+   */
+  private static Outcome outcomeOf(final Adjudicator.Verdict verdict) {
+    return switch (verdict) {
+      case WHITE_WINS -> Outcome.WHITE_WINS;
+      case BLACK_WINS -> Outcome.BLACK_WINS;
+      case DRAW -> Outcome.DRAW;
+      case NONE -> throw new IllegalArgumentException("A game that was not adjudicated has no " +
+              "adjudicated outcome");
+    };
   }
 
   /**
@@ -406,6 +457,13 @@ public class SelfPlayMatch {
     System.out.println("Games: " + lines.size() * GAMES_PER_PAIR + " over " + lines.size() +
             " pairs, ply cap " + settings.plyCap() + ", timeout " + settings.timeoutSeconds() +
             "s");
+    if (settings.adjudicate()) {
+      System.out.println("Adjudication: a win at " + settings.resignScore() + " over " +
+              settings.resignPlies() + " plies, a draw within " + settings.drawScore() + " over " +
+              settings.drawPlies() + " plies from ply " + settings.drawAfter());
+    } else {
+      System.out.println("Adjudication: off");
+    }
     System.out.println();
   }
 
@@ -488,6 +546,10 @@ public class SelfPlayMatch {
     System.out.println("Played: " + tally.played() + " of " + pairs * GAMES_PER_PAIR + " games");
     System.out.println("A wins " + tally.engineAWins() + ", B wins " + tally.engineBWins() +
             ", drawn " + tally.draws());
+    if (tally.adjudicated() > 0) {
+      System.out.println("Adjudicated: " + tally.adjudicated() + " of " + tally.played() +
+              " games");
+    }
     if (tally.played() > 0) {
       System.out.printf("Score for A: %.1f of %d, %.2f percent%n", points, tally.played(),
               100.0 * points / tally.played());
@@ -540,6 +602,17 @@ public class SelfPlayMatch {
             " by default");
     System.out.println("  --plycap <count>     the longest game allowed, " + DEFAULT_PLY_CAP +
             " by default");
+    System.out.println("  --no-adjudication    play every game out on the board");
+    System.out.println("  --resign-score <cp>  the lead a ply counts as decisive at, " +
+            DEFAULT_RESIGN_SCORE + " by default");
+    System.out.println("  --resign-plies <n>   decisive plies that win a game, " +
+            DEFAULT_RESIGN_PLIES + " by default");
+    System.out.println("  --draw-score <cp>    the score a ply counts as level within, " +
+            DEFAULT_DRAW_SCORE + " by default");
+    System.out.println("  --draw-plies <n>     level plies that draw a game, " +
+            DEFAULT_DRAW_PLIES + " by default");
+    System.out.println("  --draw-after <ply>   the ply a draw may first be given at, " +
+            DEFAULT_DRAW_AFTER + " by default");
     System.out.println("  --timeout <seconds>  the longest wait for an answer, " +
             DEFAULT_TIMEOUT_SECONDS + " by default");
     System.out.println("  --logs <directory>   where the engine logs are written, " +
@@ -577,14 +650,26 @@ public class SelfPlayMatch {
    * @param outcome How the game ended from White's point of view.
    * @param reason Why the game ended.
    * @param moves The moves the game held, including the moves of the opening.
+   * @param adjudicated True if the game ended on the reported scores rather than on the board.
    */
-  public record Result(Outcome outcome, String reason, List<String> moves) {
+  public record Result(Outcome outcome, String reason, List<String> moves, boolean adjudicated) {
 
     /**
      * Constructs a result holding a copy of the moves given.
      */
     public Result {
       moves = List.copyOf(moves);
+    }
+
+    /**
+     * Constructs a result for a game that ended on the board.
+     *
+     * @param outcome How the game ended from White's point of view.
+     * @param reason Why the game ended.
+     * @param moves The moves the game held, including the moves of the opening.
+     */
+    public Result(final Outcome outcome, final String reason, final List<String> moves) {
+      this(outcome, reason, moves, false);
     }
   }
 
@@ -595,9 +680,11 @@ public class SelfPlayMatch {
    * @param engineBWins The games engine B won.
    * @param draws The games neither engine won.
    * @param played The games that reached a result.
+   * @param adjudicated The games that ended on the reported scores rather than on the board.
    * @param failure What stopped the match, or null if every game reached a result.
    */
-  public record Tally(int engineAWins, int engineBWins, int draws, int played, String failure) {
+  public record Tally(int engineAWins, int engineBWins, int draws, int played, int adjudicated,
+                      String failure) {
   }
 
   /**
@@ -626,26 +713,36 @@ public class SelfPlayMatch {
    * @param openingIndex The only book line to play, or minus one to draw lines from the shuffle.
    * @param useBook False to play every game from the standard starting position.
    * @param plyCap The largest number of plies a game may reach.
+   * @param adjudicate True to end a game the engines agree is decided or is level.
+   * @param resignScore The score a side must be ahead by for a ply to count towards a win.
+   * @param resignPlies The number of consecutive plies at the resign score that win a game.
+   * @param drawScore The score a position must be within for a ply to count towards a draw.
+   * @param drawPlies The number of consecutive plies within the draw score that draw a game.
+   * @param drawAfter The ply a game must have reached before it may be drawn on score.
    * @param timeoutSeconds The longest an engine may take to answer.
    * @param logDirectory The directory the engine logs are written to.
    * @param verbose True to report every move and the moves of every game.
    */
   public record Settings(String engineACommand, String engineBCommand, long nodeLimitA,
                          long nodeLimitB, int tableSizeMB, String bookPath, int pairs, long seed,
-                         int openingIndex, boolean useBook, int plyCap, long timeoutSeconds,
-                         String logDirectory, boolean verbose) {
+                         int openingIndex, boolean useBook, int plyCap, boolean adjudicate,
+                         int resignScore, int resignPlies, int drawScore, int drawPlies,
+                         int drawAfter, long timeoutSeconds, String logDirectory,
+                         boolean verbose) {
 
     /**
      * Reads settings from command line arguments. The argument --nodes sets the node limit of both
      * engines, and --nodes-a and --nodes-b each set the limit of one engine and override --nodes
-     * whatever order they are given in.
+     * whatever order they are given in. Adjudication is on unless --no-adjudication is given.
      *
      * @param args The command line arguments, as described by the usage text.
      * @return The settings the arguments describe, or null if they asked for the usage text.
      * @throws IllegalArgumentException If an argument is unrecognised, names no value, holds a
      *                                  value that is not a number, if either engine command line
-     *                                  is missing, if fewer than one pair is asked for, or if
-     *                                  arguments naming different openings are given together.
+     *                                  is missing, if fewer than one pair is asked for, if
+     *                                  arguments naming different openings are given together, if
+     *                                  an adjudication value is out of range, or if an
+     *                                  adjudication value is given with --no-adjudication.
      */
     public static Settings read(final String[] args) {
       String engineACommand = null;
@@ -661,6 +758,13 @@ public class SelfPlayMatch {
       int openingIndex = -1;
       boolean useBook = true;
       int plyCap = DEFAULT_PLY_CAP;
+      boolean adjudicate = true;
+      int resignScore = DEFAULT_RESIGN_SCORE;
+      int resignPlies = DEFAULT_RESIGN_PLIES;
+      int drawScore = DEFAULT_DRAW_SCORE;
+      int drawPlies = DEFAULT_DRAW_PLIES;
+      int drawAfter = DEFAULT_DRAW_AFTER;
+      String tuningArgument = null;
       long timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
       String logDirectory = DEFAULT_LOG_DIRECTORY;
       boolean verbose = false;
@@ -672,6 +776,10 @@ public class SelfPlayMatch {
         }
         if ("--nobook".equals(argument)) {
           useBook = false;
+          continue;
+        }
+        if ("--no-adjudication".equals(argument)) {
+          adjudicate = false;
           continue;
         }
         if ("--verbose".equals(argument)) {
@@ -694,6 +802,26 @@ public class SelfPlayMatch {
           case "--seed" -> seed = number(value, argument);
           case "--opening" -> openingIndex = (int) number(value, argument);
           case "--plycap" -> plyCap = (int) number(value, argument);
+          case "--resign-score" -> {
+            resignScore = (int) number(value, argument);
+            tuningArgument = argument;
+          }
+          case "--resign-plies" -> {
+            resignPlies = (int) number(value, argument);
+            tuningArgument = argument;
+          }
+          case "--draw-score" -> {
+            drawScore = (int) number(value, argument);
+            tuningArgument = argument;
+          }
+          case "--draw-plies" -> {
+            drawPlies = (int) number(value, argument);
+            tuningArgument = argument;
+          }
+          case "--draw-after" -> {
+            drawAfter = (int) number(value, argument);
+            tuningArgument = argument;
+          }
           case "--timeout" -> timeoutSeconds = number(value, argument);
           case "--logs" -> logDirectory = value;
           default -> throw new IllegalArgumentException("Unrecognised argument: " + argument);
@@ -719,11 +847,24 @@ public class SelfPlayMatch {
         }
         pairs = 1;
       }
+      if (!adjudicate && tuningArgument != null) {
+        throw new IllegalArgumentException("The argument " + tuningArgument + " tunes " +
+                "adjudication, so it cannot be given with --no-adjudication");
+      }
+      if (resignScore < 0 || drawScore < 0 || drawAfter < 0) {
+        throw new IllegalArgumentException("The values of --resign-score, --draw-score and " +
+                "--draw-after cannot be negative");
+      }
+      if (resignPlies < 1 || drawPlies < 1) {
+        throw new IllegalArgumentException("The values of --resign-plies and --draw-plies must " +
+                "be at least one");
+      }
       final long shared = nodeLimitBoth == null ? DEFAULT_NODE_LIMIT : nodeLimitBoth;
       final long limitA = nodeLimitA == null ? shared : nodeLimitA;
       final long limitB = nodeLimitB == null ? shared : nodeLimitB;
       return new Settings(engineACommand, engineBCommand, limitA, limitB, tableSizeMB, bookPath,
-              pairs, seed, openingIndex, useBook, plyCap, timeoutSeconds, logDirectory, verbose);
+              pairs, seed, openingIndex, useBook, plyCap, adjudicate, resignScore, resignPlies,
+              drawScore, drawPlies, drawAfter, timeoutSeconds, logDirectory, verbose);
     }
 
     /**
