@@ -181,7 +181,7 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Plays every pair of the match on one pair of engine processes, reporting each game as it ends.
+   * Plays every pair of the match on one pair of engine processes, reporting each pair as it ends.
    * The match stops at the first failure, and the games played before it are still counted.
    *
    * @param settings The settings the match is played under.
@@ -200,11 +200,7 @@ public class SelfPlayMatch {
 
     final Path logDirectory = Path.of(settings.logDirectory());
     final long timeoutMillis = settings.timeoutSeconds() * 1_000L;
-    int engineAWins = 0;
-    int engineBWins = 0;
-    int draws = 0;
-    int played = 0;
-    int adjudicated = 0;
+    final Accumulator accumulator = new Accumulator();
 
     try (EngineProcess engineA = new EngineProcess(ENGINE_A_NAME, commandA,
             logDirectory.resolve("engine-a.log"), timeoutMillis);
@@ -214,43 +210,72 @@ public class SelfPlayMatch {
       prepare(engineB, settings);
 
       for (int pair = 0; pair < lines.size(); pair++) {
-        final BookLine line = lines.get(pair);
-        printPair(pair + 1, line);
-        for (int game = 0; game < GAMES_PER_PAIR; game++) {
-          final boolean engineAIsWhite = game == 0;
-          final EngineProcess white = engineAIsWhite ? engineA : engineB;
-          final EngineProcess black = engineAIsWhite ? engineB : engineA;
-          final long whiteNodeLimit =
-                  engineAIsWhite ? settings.nodeLimitA() : settings.nodeLimitB();
-          final long blackNodeLimit =
-                  engineAIsWhite ? settings.nodeLimitB() : settings.nodeLimitA();
-          final Result result = play(settings, line.opening(), white, black, whiteNodeLimit,
-                  blackNodeLimit);
-          printGame(game + 1, engineAIsWhite, result, settings.verbose());
-          if (result.outcome() == Outcome.FAILURE) {
-            return new Tally(engineAWins, engineBWins, draws, played, adjudicated,
-                    result.reason());
-          }
-          played++;
-          if (result.adjudicated()) {
-            adjudicated++;
-          }
-          if (result.outcome() == Outcome.DRAW) {
-            draws++;
-          } else if ((result.outcome() == Outcome.WHITE_WINS) == engineAIsWhite) {
-            engineAWins++;
-          } else {
-            engineBWins++;
-          }
+        final PairResult result = playPair(settings, pair + 1, lines.get(pair), engineA, engineB);
+        for (final String line : result.report()) {
+          System.out.println(line);
         }
-        if (settled(settings.sequentialTest(), engineAWins, engineBWins, draws)) {
+        accumulator.add(result);
+        if (result.failure() != null) {
+          return accumulator.tally(result.failure());
+        }
+        if (settled(settings.sequentialTest(), accumulator)) {
           break;
         }
       }
     } catch (final EngineProcess.Fault fault) {
-      return new Tally(engineAWins, engineBWins, draws, played, adjudicated, fault.getMessage());
+      return accumulator.tally(fault.getMessage());
     }
-    return new Tally(engineAWins, engineBWins, draws, played, adjudicated, null);
+    return accumulator.tally(null);
+  }
+
+  /**
+   * Plays both games of one pair, the second of them with the colours reversed, collecting the
+   * lines that report them rather than writing them out. The pair stops at the first failure, and
+   * the game played before it is still counted.
+   *
+   * @param settings The settings the pair is played under.
+   * @param pair The number of the pair, counting from one.
+   * @param line The opening both games are played from.
+   * @param engineA The first engine, which plays White in the first game.
+   * @param engineB The second engine, which plays White in the second game.
+   * @return What the games of the pair came to and the lines reporting them.
+   */
+  private static PairResult playPair(final Settings settings, final int pair, final BookLine line,
+                                     final EngineProcess engineA, final EngineProcess engineB) {
+    final List<String> report = new ArrayList<>();
+    reportPair(report, pair, line);
+    int engineAWins = 0;
+    int engineBWins = 0;
+    int draws = 0;
+    int played = 0;
+    int adjudicated = 0;
+
+    for (int game = 0; game < GAMES_PER_PAIR; game++) {
+      final boolean engineAIsWhite = game == 0;
+      final EngineProcess white = engineAIsWhite ? engineA : engineB;
+      final EngineProcess black = engineAIsWhite ? engineB : engineA;
+      final long whiteNodeLimit = engineAIsWhite ? settings.nodeLimitA() : settings.nodeLimitB();
+      final long blackNodeLimit = engineAIsWhite ? settings.nodeLimitB() : settings.nodeLimitA();
+      final Result result = play(settings, line.opening(), white, black, whiteNodeLimit,
+              blackNodeLimit, report);
+      reportGame(report, game + 1, engineAIsWhite, result, settings.verbose());
+      if (result.outcome() == Outcome.FAILURE) {
+        return new PairResult(engineAWins, engineBWins, draws, played, adjudicated,
+                result.reason(), report);
+      }
+      played++;
+      if (result.adjudicated()) {
+        adjudicated++;
+      }
+      if (result.outcome() == Outcome.DRAW) {
+        draws++;
+      } else if ((result.outcome() == Outcome.WHITE_WINS) == engineAIsWhite) {
+        engineAWins++;
+      } else {
+        engineBWins++;
+      }
+    }
+    return new PairResult(engineAWins, engineBWins, draws, played, adjudicated, null, report);
   }
 
   /**
@@ -258,17 +283,16 @@ public class SelfPlayMatch {
    * settled it. A match holding no test is never settled this way and reports nothing.
    *
    * @param test The hypotheses the games are weighed between, or null if the match holds no test.
-   * @param engineAWins The games engine A has won.
-   * @param engineBWins The games engine B has won.
-   * @param draws The games neither engine has won.
+   * @param accumulator What the pairs played so far have come to.
    * @return True if the match should stop before its remaining pairs are played.
    */
-  private static boolean settled(final MatchStatistics.SequentialTest test, final int engineAWins,
-                                 final int engineBWins, final int draws) {
+  private static boolean settled(final MatchStatistics.SequentialTest test,
+                                 final Accumulator accumulator) {
     if (test == null) {
       return false;
     }
-    final MatchStatistics statistics = new MatchStatistics(engineAWins, engineBWins, draws);
+    final MatchStatistics statistics = new MatchStatistics(accumulator.engineAWins,
+            accumulator.engineBWins, accumulator.draws);
     System.out.printf("  test    LLR %+.2f of %+.2f to %+.2f after %d games%n",
             statistics.logLikelihoodRatio(test), test.lowerBound(), test.upperBound(),
             statistics.games());
@@ -285,11 +309,14 @@ public class SelfPlayMatch {
    * @param black The engine playing Black.
    * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
    * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
+   * @param report The lines reporting the pair, which this method appends to when the match is
+   *               verbose.
    * @return The outcome of the game, why it ended, and the moves it held.
    */
   public static Result play(final Settings settings, final OpeningBook.Opening opening,
                             final EngineProcess white, final EngineProcess black,
-                            final long whiteNodeLimit, final long blackNodeLimit) {
+                            final long whiteNodeLimit, final long blackNodeLimit,
+                            final List<String> report) {
     final List<String> moves = new ArrayList<>();
     final Board board = opening == null ? Board.createStandardBoard() : OpeningBook.play(opening);
     if (opening != null) {
@@ -298,7 +325,8 @@ public class SelfPlayMatch {
     try {
       white.newGame();
       black.newGame();
-      return playMoves(settings, board, moves, white, black, whiteNodeLimit, blackNodeLimit);
+      return playMoves(settings, board, moves, white, black, whiteNodeLimit, blackNodeLimit,
+              report);
     } catch (final EngineProcess.Fault fault) {
       return new Result(Outcome.FAILURE, fault.getMessage(), moves);
     }
@@ -328,13 +356,15 @@ public class SelfPlayMatch {
    * @param black The engine playing Black.
    * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
    * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
+   * @param report The lines reporting the pair, which this method appends to when the match is
+   *               verbose.
    * @return The outcome of the game, why it ended, and the moves it held.
    * @throws EngineProcess.Fault If an engine does not answer.
    */
   private static Result playMoves(final Settings settings, final Board board,
                                   final List<String> moves, final EngineProcess white,
                                   final EngineProcess black, final long whiteNodeLimit,
-                                  final long blackNodeLimit) {
+                                  final long blackNodeLimit, final List<String> report) {
     final Adjudicator adjudicator = new Adjudicator(settings.adjudicate(),
             settings.resignScore(), settings.resignPlies(), settings.drawScore(),
             settings.drawPlies(), settings.drawAfter());
@@ -371,7 +401,7 @@ public class SelfPlayMatch {
       board.makeMove(move);
       moves.add(reply.move());
       if (settings.verbose()) {
-        printMove(moves.size(), whiteToMove, reply);
+        reportMove(report, moves.size(), whiteToMove, reply);
       }
       verdict = adjudicator.judge(reply, whiteToMove, moves.size());
     }
@@ -520,50 +550,54 @@ public class SelfPlayMatch {
   }
 
   /**
-   * Reports the opening a pair is about to be played from.
+   * Writes the opening a pair is played from into the lines reporting the pair.
    *
+   * @param report The lines reporting the pair, which this method appends to.
    * @param pair The number of the pair, counting from one.
    * @param line The opening the pair is played from.
    */
-  private static void printPair(final int pair, final BookLine line) {
+  private static void reportPair(final List<String> report, final int pair, final BookLine line) {
     if (line.opening() == null) {
-      System.out.println("Pair " + pair + ": the standard starting position");
+      report.add("Pair " + pair + ": the standard starting position");
       return;
     }
-    System.out.println("Pair " + pair + ": line " + line.index() + ", " + line.opening().eco() +
+    report.add("Pair " + pair + ": line " + line.index() + ", " + line.opening().eco() +
             " " + line.opening().name() + ", " + String.join(" ", line.opening().moves()));
   }
 
   /**
-   * Reports one game as it ends.
+   * Writes how one game ended into the lines reporting its pair.
    *
+   * @param report The lines reporting the pair, which this method appends to.
    * @param game The number of the game within its pair, counting from one.
    * @param engineAIsWhite True if engine A played White.
    * @param result How the game ended.
    * @param verbose True to report the moves the game held.
    */
-  private static void printGame(final int game, final boolean engineAIsWhite, final Result result,
-                                final boolean verbose) {
-    System.out.printf("  game %d  White %s  %-7s  %3d plies  %s%n", game,
+  private static void reportGame(final List<String> report, final int game,
+                                 final boolean engineAIsWhite, final Result result,
+                                 final boolean verbose) {
+    report.add(String.format("  game %d  White %s  %-7s  %3d plies  %s", game,
             engineAIsWhite ? ENGINE_A_NAME : ENGINE_B_NAME, scoreOf(result.outcome()),
-            result.moves().size(), result.reason());
+            result.moves().size(), result.reason()));
     if (verbose) {
-      System.out.println("  moves: " + String.join(" ", result.moves()));
+      report.add("  moves: " + String.join(" ", result.moves()));
     }
   }
 
   /**
-   * Reports one move as it is played. The score column holds the score from White's point of
-   * view, not from the point of view of the engine that reported it.
+   * Writes one move into the lines reporting its pair. The score column holds the score from
+   * White's point of view, not from the point of view of the engine that reported it.
    *
+   * @param report The lines reporting the pair, which this method appends to.
    * @param ply The number of the ply just played, counting the moves of the opening.
    * @param whiteMoved True if White played the move.
    * @param reply What the engine reported.
    */
-  private static void printMove(final int ply, final boolean whiteMoved,
-                                final EngineProcess.Reply reply) {
-    System.out.printf("%6d  %s  %-6s  %9s  %7.2fs%n", ply, whiteMoved ? "W" : "B", reply.move(),
-            scoreText(reply, whiteMoved), reply.elapsedMillis() / 1000.0);
+  private static void reportMove(final List<String> report, final int ply,
+                                 final boolean whiteMoved, final EngineProcess.Reply reply) {
+    report.add(String.format("%6d  %s  %-6s  %9s  %7.2fs", ply, whiteMoved ? "W" : "B",
+            reply.move(), scoreText(reply, whiteMoved), reply.elapsedMillis() / 1000.0));
   }
 
   /**
@@ -755,6 +789,67 @@ public class SelfPlayMatch {
    */
   public record Tally(int engineAWins, int engineBWins, int draws, int played, int adjudicated,
                       String failure) {
+  }
+
+
+  /**
+   * The PairResult record holds what the games of one pair came to and the lines reporting them.
+   *
+   * @param engineAWins The games engine A won.
+   * @param engineBWins The games engine B won.
+   * @param draws The games neither engine won.
+   * @param played The games that reached a result.
+   * @param adjudicated The games that ended on the reported scores rather than on the board.
+   * @param failure What stopped the pair, or null if both games reached a result.
+   * @param report The lines reporting the pair, in the order they are written out.
+   */
+  private record PairResult(int engineAWins, int engineBWins, int draws, int played,
+                            int adjudicated, String failure, List<String> report) {
+  }
+
+  /**
+   * The Accumulator class holds what the pairs played so far have come to.
+   */
+  private static final class Accumulator {
+
+    /** The games engine A has won. */
+    private int engineAWins;
+
+    /** The games engine B has won. */
+    private int engineBWins;
+
+    /** The games neither engine has won. */
+    private int draws;
+
+    /** The games that have reached a result. */
+    private int played;
+
+    /** The games that ended on the reported scores rather than on the board. */
+    private int adjudicated;
+
+    /**
+     * Folds the games of one pair into the running count.
+     *
+     * @param result What the games of the pair came to.
+     */
+    private void add(final PairResult result) {
+      this.engineAWins += result.engineAWins();
+      this.engineBWins += result.engineBWins();
+      this.draws += result.draws();
+      this.played += result.played();
+      this.adjudicated += result.adjudicated();
+    }
+
+    /**
+     * Names what the pairs played so far have come to.
+     *
+     * @param failure What stopped the match, or null if every game reached a result.
+     * @return The tally the match is reported from.
+     */
+    private Tally tally(final String failure) {
+      return new Tally(this.engineAWins, this.engineBWins, this.draws, this.played,
+              this.adjudicated, failure);
+    }
   }
 
   /**
