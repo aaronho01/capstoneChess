@@ -832,30 +832,26 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     double safetyScore = 0;
     final Collection<Piece> playerPieces = player.getActivePieces();
     final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
+    final Collection<Move> playerMoves = player.getLegalMoves();
 
-    Map<Integer, List<Piece>> opponentAttacks = new HashMap<>();
+    final int[] attackerCounts = new int[BoardUtils.NUM_TILES];
     for (final Move move : opponentMoves) {
-      int destination = move.getDestinationCoordinate();
-      opponentAttacks.computeIfAbsent(destination, k -> new ArrayList<>()).add(move.getMovedPiece());
+      attackerCounts[move.getDestinationCoordinate()]++;
     }
 
-    Map<Integer, List<Piece>> playerDefenses = new HashMap<>();
-    for (final Move move : player.getLegalMoves()) {
-      int destination = move.getDestinationCoordinate();
-      playerDefenses.computeIfAbsent(destination, k -> new ArrayList<>()).add(move.getMovedPiece());
+    final int[] defenderCounts = new int[BoardUtils.NUM_TILES];
+    for (final Move move : playerMoves) {
+      defenderCounts[move.getDestinationCoordinate()]++;
     }
 
     for (final Piece piece : playerPieces) {
       if (piece.getPieceType() == Piece.PieceType.KING) continue;
 
       final int position = piece.getPiecePosition();
-      final List<Piece> attackers = opponentAttacks.getOrDefault(position, new ArrayList<>());
-      final List<Piece> defenders = playerDefenses.getOrDefault(position, new ArrayList<>());
+      final int attackerCount = attackerCounts[position];
+      final int defenderCount = defenderCounts[position];
 
-      if (!attackers.isEmpty()) {
-        int attackerCount = attackers.size();
-        int defenderCount = defenders.size();
-
+      if (attackerCount > 0) {
         if (defenderCount == 0) {
           switch (piece.getPieceType()) {
             case QUEEN -> safetyScore -= 800;
@@ -864,12 +860,13 @@ public class OpeningGameEvaluator implements BoardEvaluator {
             case PAWN -> safetyScore -= 90;
           }
         } else if (attackerCount > defenderCount) {
-          int materialLoss = calculateSimpleExchange(piece, attackers, defenders);
+          final int[] attackerValues = sortedMovedPieceValues(opponentMoves, position, attackerCount);
+          final int[] defenderValues = sortedMovedPieceValues(playerMoves, position, defenderCount);
+          int materialLoss = calculateSimpleExchange(piece, attackerValues, defenderValues);
           safetyScore -= materialLoss * 0.7;
         }
       }
 
-      int defenderCount = defenders.size();
       if (defenderCount > 0) {
         switch (piece.getPieceType()) {
           case QUEEN -> safetyScore += Math.min(defenderCount * 15, 45);
@@ -883,27 +880,38 @@ public class OpeningGameEvaluator implements BoardEvaluator {
   }
 
   /**
+   * Collects the moved piece values of every move that targets a square, in ascending order.
+   *
+   * @param moves The moves to scan.
+   * @param position The targeted square.
+   * @param count The number of moves in the collection whose destination is the targeted square.
+   * @return The moved piece values in ascending order.
+   */
+  private int[] sortedMovedPieceValues(final Collection<Move> moves, final int position, final int count) {
+    final int[] values = new int[count];
+    int index = 0;
+
+    for (final Move move : moves) {
+      if (move.getDestinationCoordinate() == position) {
+        values[index++] = move.getMovedPiece().getPieceValue();
+      }
+    }
+
+    Arrays.sort(values);
+
+    return values;
+  }
+
+  /**
    * Calculates the approximate material outcome of an exchange sequence.
    * Uses simplified logic to estimate the result of a capture sequence.
    *
    * @param piece The piece being attacked.
-   * @param attackers List of pieces that can capture.
-   * @param defenders List of pieces that can defend.
+   * @param attackerValues The values of the pieces that can capture, in ascending order.
+   * @param defenderValues The values of the pieces that can defend, in ascending order.
    * @return The estimated material loss for the defending side.
    */
-  private int calculateSimpleExchange(final Piece piece, final List<Piece> attackers, final List<Piece> defenders) {
-    List<Integer> attackerValues = attackers.stream()
-            .mapToInt(Piece::getPieceValue)
-            .sorted()
-            .boxed()
-            .toList();
-
-    List<Integer> defenderValues = defenders.stream()
-            .mapToInt(Piece::getPieceValue)
-            .sorted()
-            .boxed()
-            .toList();
-
+  private int calculateSimpleExchange(final Piece piece, final int[] attackerValues, final int[] defenderValues) {
     int materialBalance = 0;
     int targetValue = piece.getPieceValue();
     boolean attackerTurn = true;
@@ -913,18 +921,18 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     int attackerIndex = 0;
     int defenderIndex = 0;
 
-    while ((attackerTurn && defenderIndex < defenderValues.size()) ||
-            (!attackerTurn && attackerIndex < attackerValues.size())) {
+    while ((attackerTurn && defenderIndex < defenderValues.length) ||
+            (!attackerTurn && attackerIndex < attackerValues.length)) {
 
       if (attackerTurn) {
-        if (attackerIndex < attackerValues.size()) {
-          materialBalance -= attackerValues.get(attackerIndex);
+        if (attackerIndex < attackerValues.length) {
+          materialBalance -= attackerValues[attackerIndex];
           attackerIndex++;
         }
         defenderIndex++;
       } else {
-        if (defenderIndex < defenderValues.size()) {
-          materialBalance += defenderValues.get(defenderIndex);
+        if (defenderIndex < defenderValues.length) {
+          materialBalance += defenderValues[defenderIndex];
           defenderIndex++;
         }
         attackerIndex++;

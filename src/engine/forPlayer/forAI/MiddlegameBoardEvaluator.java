@@ -1130,10 +1130,15 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       squareProtectionCount[move.getDestinationCoordinate()]++;
     }
 
-    Map<Integer, List<Move>> opponentAttacks = new HashMap<>();
+    int[] squareAttackCount = new int[BoardUtils.NUM_TILES];
+    int[] squarePawnAttackCount = new int[BoardUtils.NUM_TILES];
+
     for (final Move move : opponent.getLegalMoves()) {
-      int destination = move.getDestinationCoordinate();
-      opponentAttacks.computeIfAbsent(destination, k -> new ArrayList<>()).add(move);
+      final int destination = move.getDestinationCoordinate();
+      squareAttackCount[destination]++;
+      if (move.getMovedPiece().getPieceType() == Piece.PieceType.PAWN) {
+        squarePawnAttackCount[destination]++;
+      }
     }
 
     for (final Piece piece : playerPieces) {
@@ -1141,9 +1146,9 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
 
       final int position = piece.getPiecePosition();
       final int protectionCount = squareProtectionCount[position];
-      final List<Move> attacks = opponentAttacks.getOrDefault(position, new ArrayList<>());
+      final int attackCount = squareAttackCount[position];
 
-      if (!attacks.isEmpty()) {
+      if (attackCount > 0) {
         if (protectionCount == 0) {
           switch (piece.getPieceType()) {
             case QUEEN -> protectionScore -= 850;
@@ -1152,8 +1157,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
             case KNIGHT -> protectionScore -= 300;
             case PAWN -> protectionScore -= 95;
           }
-        } else if (attacks.size() > protectionCount) {
-          double penalty = piece.getPieceValue() * 0.8 * (attacks.size() - protectionCount);
+        } else if (attackCount > protectionCount) {
+          double penalty = piece.getPieceValue() * 0.8 * (attackCount - protectionCount);
           protectionScore -= penalty;
         } else {
           protectionScore += piece.getPieceValue() * 0.1;
@@ -1168,8 +1173,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
         }
       }
 
-      for (final Move attack : attacks) {
-        if (attack.getMovedPiece().getPieceType() == Piece.PieceType.PAWN && protectionCount == 0) {
+      if (protectionCount == 0) {
+        for (int i = 0; i < squarePawnAttackCount[position]; i++) {
           protectionScore -= piece.getPieceValue() * 0.3;
         }
       }
