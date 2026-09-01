@@ -131,6 +131,33 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The low bits of a packed quiescence ordering key that hold the source index of a capture. */
   private static final long INDEX_MASK = (1L << 30) - 1;
 
+  /** The number of low bits of a packed standard ordering key that hold a move's source index. */
+  private static final int ORDER_INDEX_BITS = 10;
+
+  /** The mask that recovers a move's source index from a packed standard ordering key. */
+  private static final long ORDER_INDEX_MASK = (1L << ORDER_INDEX_BITS) - 1;
+
+  /** The bit position at which a packed standard ordering key holds its tier. */
+  private static final int ORDER_TIER_SHIFT = ORDER_INDEX_BITS + 32;
+
+  /** The tier bit a packed standard ordering key sets when its move is not an undefended capture. */
+  private static final long UNDEFENDED_TIER_BIT = 16;
+
+  /** The tier bit a packed standard ordering key sets when its move is not a killer move. */
+  private static final long KILLER_TIER_BIT = 8;
+
+  /** The tier bit a packed standard ordering key sets when its move is not a countermove. */
+  private static final long COUNTER_TIER_BIT = 4;
+
+  /** The tier rank of a capture whose static exchange score is not negative. */
+  private static final long GOOD_CAPTURE_RANK = 0;
+
+  /** The tier rank of a move that is not a capture. */
+  private static final long QUIET_RANK = 1;
+
+  /** The tier rank of a capture whose static exchange score is negative. */
+  private static final long BAD_CAPTURE_RANK = 2;
+
   /** The score of a checkmate delivered at the root, reduced by one for each ply to the mate. */
   public static final double MATE_VALUE = 1000000;
 
@@ -155,97 +182,50 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       @Override
       Collection<Move> sort(final Collection<Move> moves, final Board board,
                             final AlphaBeta engine, final int ply) {
-        List<Move> sortedMoves = new ArrayList<>(moves);
-        Move[][] killers = engine.killerMoves.get();
-        Move lastMove = board.getTransitionMove();
+        final Move[] ordered = moves.toArray(new Move[0]);
+        final int count = ordered.length;
+        final Move[][] killers = engine.killerMoves.get();
+        final Move counter = counterMoveOf(board, engine);
 
-        // Every input the comparator reads is resolved once per move here. The history heuristic in
-        // particular is written by other search threads on a beta cutoff, so reading it inside the
-        // comparator lets the ordering change mid-sort and makes the sort throw.
-        Map<Move, Integer> seeScores = new HashMap<>();
-        Map<Move, Integer> historyScores = new HashMap<>();
-        Map<Move, Boolean> isUndefendedMap = new HashMap<>();
-        Map<Move, Boolean> isKillerMap = new HashMap<>();
-        Map<Move, Boolean> isCounterMap = new HashMap<>();
+        // Bits 42 through 46 hold the tier, which is set for each ordering property the move does
+        // not have so that a move having it sorts first, and is completed by the capture rank so
+        // that a good capture outranks a quiet move and a quiet move outranks a bad capture. Bits
+        // 10 through 41 hold the static exchange score of a capture or the history score of a
+        // quiet move, negated against Integer.MAX_VALUE so that higher scores sort first. Bits 0
+        // through 9 hold the source index, so equal keys keep move generation order and a list of
+        // more than ORDER_INDEX_MASK moves cannot be packed. Every key is non-negative, so sorting
+        // the packed values ascending yields the intended move order.
+        final long[] orderKeys = new long[count];
+        for (int i = 0; i < count; i++) {
+          final Move move = ordered[i];
+          final boolean capture = move.isAttack();
 
-        for (Move move : sortedMoves) {
-          if (move.isAttack()) {
-            seeScores.put(move, engine.seeEvaluator.evaluate(board, move));
-            Piece attackedPiece = move.getAttackedPiece();
-            isUndefendedMap.put(move, attackedPiece != null &&
-                    !engine.seeEvaluator.isPieceDefended(attackedPiece, board));
+          int exchangeScore = 0;
+          boolean undefended = false;
+          if (capture) {
+            exchangeScore = engine.seeEvaluator.evaluate(board, move);
+            final Piece attackedPiece = move.getAttackedPiece();
+            undefended = attackedPiece != null &&
+                    !engine.seeEvaluator.isPieceDefended(attackedPiece, board);
           }
 
-          historyScores.put(move, isValidPosition(move) ?
-                  engine.historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] : 0);
+          final long rank = capture ? (exchangeScore >= 0 ? GOOD_CAPTURE_RANK : BAD_CAPTURE_RANK) :
+                  QUIET_RANK;
+          final long tier = (undefended ? 0 : UNDEFENDED_TIER_BIT) +
+                  (move.equals(killers[0][ply]) || move.equals(killers[1][ply]) ? 0 : KILLER_TIER_BIT) +
+                  (counter != null && move.equals(counter) ? 0 : COUNTER_TIER_BIT) + rank;
+          final long secondary = (long) Integer.MAX_VALUE -
+                  (capture ? (long) exchangeScore : (long) historyOf(move, engine));
 
-          isKillerMap.put(move, move.equals(killers[0][ply]) || move.equals(killers[1][ply]));
-
-          boolean isCounter = false;
-          if (lastMove != null && lastMove != MoveFactory.getNullMove() &&
-                  lastMove.getCurrentCoordinate() >= 0 && lastMove.getDestinationCoordinate() >= 0 &&
-                  lastMove.getCurrentCoordinate() < 64 && lastMove.getDestinationCoordinate() < 64) {
-            isCounter = move.equals(engine.counterMoves[lastMove.getCurrentCoordinate()][lastMove.getDestinationCoordinate()].get());
-          }
-          isCounterMap.put(move, isCounter);
+          orderKeys[i] = (tier << ORDER_TIER_SHIFT) | (secondary << ORDER_INDEX_BITS) | i;
         }
+        Arrays.sort(orderKeys);
 
-        sortedMoves.sort((move1, move2) -> {
-          boolean isUndefendedCapture1 = isUndefendedMap.getOrDefault(move1, false);
-          boolean isUndefendedCapture2 = isUndefendedMap.getOrDefault(move2, false);
-
-          if (isUndefendedCapture1 != isUndefendedCapture2) {
-            return isUndefendedCapture1 ? -1 : 1;
-          }
-
-          boolean isKiller1 = isKillerMap.getOrDefault(move1, false);
-          boolean isKiller2 = isKillerMap.getOrDefault(move2, false);
-
-          if (isKiller1 != isKiller2) {
-            return isKiller1 ? -1 : 1;
-          }
-
-          boolean isCounter1 = isCounterMap.getOrDefault(move1, false);
-          boolean isCounter2 = isCounterMap.getOrDefault(move2, false);
-
-          if (isCounter1 != isCounter2) {
-            return isCounter1 ? -1 : 1;
-          }
-
-          boolean isCapture1 = move1.isAttack();
-          boolean isCapture2 = move2.isAttack();
-
-          if (isCapture1 && isCapture2) {
-            int score1 = seeScores.getOrDefault(move1, 0);
-            int score2 = seeScores.getOrDefault(move2, 0);
-            return Integer.compare(score2, score1);
-          } else if (isCapture1 != isCapture2) {
-            if (isCapture1) {
-              int seeValue = seeScores.getOrDefault(move1, 0);
-              return seeValue >= 0 ? -1 : 1;
-            } else {
-              int seeValue = seeScores.getOrDefault(move2, 0);
-              return seeValue >= 0 ? 1 : -1;
-            }
-          }
-
-          return Integer.compare(historyScores.getOrDefault(move2, 0),
-                  historyScores.getOrDefault(move1, 0));
-        });
+        final List<Move> sortedMoves = new ArrayList<>(count);
+        for (final long orderKey : orderKeys) {
+          sortedMoves.add(ordered[(int) (orderKey & ORDER_INDEX_MASK)]);
+        }
         return sortedMoves;
-      }
-
-      /**
-       * Validates that a move has coordinates within the valid range for history heuristic access.
-       *
-       * @param move The move to validate.
-       * @return True if the move has valid coordinates, false otherwise.
-       */
-      private boolean isValidPosition(Move move) {
-        if (move == null) return false;
-        int current = move.getCurrentCoordinate();
-        int dest = move.getDestinationCoordinate();
-        return current >= 0 && current < 64 && dest >= 0 && dest < 64;
       }
     },
 
@@ -317,6 +297,43 @@ public class AlphaBeta extends Observable implements MoveStrategy {
      */
     abstract Collection<Move> sort(Collection<Move> moves, final Board board,
                                    final AlphaBeta engine, final int ply);
+
+    /**
+     * Returns the countermove recorded against the move that produced the given position.
+     *
+     * @param board The position being sorted.
+     * @param engine The engine holding the countermove table.
+     * @return The recorded countermove, or null if none is recorded.
+     */
+    private static Move counterMoveOf(final Board board, final AlphaBeta engine) {
+      final Move lastMove = board.getTransitionMove();
+      if (lastMove == null || lastMove == MoveFactory.getNullMove() ||
+              lastMove.getCurrentCoordinate() < 0 || lastMove.getDestinationCoordinate() < 0 ||
+              lastMove.getCurrentCoordinate() >= 64 || lastMove.getDestinationCoordinate() >= 64) {
+        return null;
+      }
+      return engine.counterMoves[lastMove.getCurrentCoordinate()]
+              [lastMove.getDestinationCoordinate()].get();
+    }
+
+    /**
+     * Returns the history heuristic score recorded for the given move.
+     *
+     * @param move The move to score.
+     * @param engine The engine holding the history table.
+     * @return The recorded history score, or zero if the move has no pair of squares in range.
+     */
+    private static int historyOf(final Move move, final AlphaBeta engine) {
+      if (move == null) {
+        return 0;
+      }
+      final int current = move.getCurrentCoordinate();
+      final int destination = move.getDestinationCoordinate();
+      if (current < 0 || current >= 64 || destination < 0 || destination >= 64) {
+        return 0;
+      }
+      return engine.historyHeuristic[current][destination];
+    }
   }
 
   /**
