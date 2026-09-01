@@ -111,16 +111,17 @@ public abstract class Player {
   }
 
   /**
-   * Establishes the king piece for this player by locating it among active pieces.
+   * Establishes the king piece for this player from the board's tracked kings.
    *
    * @return The king piece belonging to this player.
-   * @throws RuntimeException If no king piece is found among active pieces.
+   * @throws RuntimeException If this player has no king on the board.
    */
   private King establishKing() {
-    return (King) getActivePieces().stream()
-            .filter(piece -> piece.getPieceType() == KING)
-            .findAny()
-            .orElseThrow(RuntimeException::new);
+    final King king = this.board.getKing(getAlliance());
+    if (king == null) {
+      throw new RuntimeException("No " + getAlliance() + " king on the board.");
+    }
+    return king;
   }
 
   /**

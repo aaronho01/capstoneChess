@@ -38,6 +38,22 @@ public final class Board {
   /** The black pieces currently on the board. Kept in sync with boardConfig by placePiece/removePiece. */
   private List<Piece> blackPieces;
 
+  /**
+   * The white king currently on the board, or null if white has no king. Kept in sync by
+   * {@link #placePiece(Piece)}. A king is never captured, and every king relocation removes the
+   * king and then places it again, so this reference is current whenever a make or unmake has
+   * run to completion.
+   */
+  private King whiteKing;
+
+  /**
+   * The black king currently on the board, or null if black has no king. Kept in sync by
+   * {@link #placePiece(Piece)}. A king is never captured, and every king relocation removes the
+   * king and then places it again, so this reference is current whenever a make or unmake has
+   * run to completion.
+   */
+  private King blackKing;
+
   /** The player controlling the white pieces on the board. Rebuilt whenever the board is mutated. */
   private WhitePlayer whitePlayer;
 
@@ -99,13 +115,14 @@ public final class Board {
     this.boardConfig = new HashMap<>(builder.BoardConfigurations);
     this.whitePieces = new ArrayList<>(calculateActivePieces(builder, Alliance.WHITE));
     this.blackPieces = new ArrayList<>(calculateActivePieces(builder, Alliance.BLACK));
+    establishKings();
     this.enPassantPawn = builder.enPassantPawn;
     this.whitePlayer = new WhitePlayer(this, this.blackPieces);
     this.blackPlayer = new BlackPlayer(this, this.whitePieces);
     this.currentPlayer = builder.nextMoveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
     this.transitionMove = getNullMove();
     this.zobristHash = builder.zobristHash != 0 ? builder.zobristHash :
-        ZobristHashing.calculateBoardHash(this);
+            ZobristHashing.calculateBoardHash(this);
     this.halfMoveClock = builder.halfMoveClock;
     this.plyCount = builder.plyCount;
     this.positionCounts.put(this.zobristHash, 1);
@@ -136,6 +153,8 @@ public final class Board {
     this.boardConfig = new HashMap<>(source.boardConfig);
     this.whitePieces = new ArrayList<>(source.whitePieces);
     this.blackPieces = new ArrayList<>(source.blackPieces);
+    this.whiteKing = source.whiteKing;
+    this.blackKing = source.blackKing;
     this.enPassantPawn = source.enPassantPawn;
     this.transitionMove = source.transitionMove;
     this.zobristHash = source.zobristHash;
@@ -327,6 +346,16 @@ public final class Board {
    */
   public Piece getPiece(final int coordinate) {
     return this.boardConfig.get(coordinate);
+  }
+
+  /**
+   * Retrieves the king belonging to the given alliance.
+   *
+   * @param alliance The alliance whose king to retrieve.
+   * @return The king of that alliance, or null if that alliance has no king on the board.
+   */
+  public King getKing(final Alliance alliance) {
+    return alliance.isWhite() ? this.whiteKing : this.blackKing;
   }
 
   /**
@@ -536,14 +565,18 @@ public final class Board {
 
   /**
    * Places a piece on the board at its own reported position, adding it to the board's piece
-   * configuration and to the appropriate alliance's piece list. Used only by the mutating
-   * makeMove/unmakeMove path in the {@link Move} hierarchy.
+   * configuration and to the appropriate alliance's piece list, and recording it as that
+   * alliance's king if it is one. Used only by the mutating makeMove/unmakeMove path in the
+   * {@link Move} hierarchy.
    *
    * @param piece The piece to place, at the square given by its own position.
    */
   void placePiece(final Piece piece) {
     this.boardConfig.put(piece.getPiecePosition(), piece);
     final List<Piece> pieces = piece.getPieceAllegiance().isWhite() ? this.whitePieces : this.blackPieces;
+    if (piece.getPieceType() == Piece.PieceType.KING) {
+      recordKing((King) piece);
+    }
     final int coordinate = piece.getPiecePosition();
     int index = 0;
     while (index < pieces.size() && pieces.get(index).getPiecePosition() < coordinate) {
@@ -683,6 +716,31 @@ public final class Board {
     for (Piece piece : pieces) {
       legalMoves.addAll(piece.calculateLegalMoves(this));
     } return legalMoves;
+  }
+
+  /**
+   * Scans this board's piece configuration and records the king of each alliance. An alliance
+   * with no king on the board is left with a null king.
+   */
+  private void establishKings() {
+    for (final Piece piece : this.boardConfig.values()) {
+      if (piece.getPieceType() == Piece.PieceType.KING) {
+        recordKing((King) piece);
+      }
+    }
+  }
+
+  /**
+   * Records the given king as the current king of its alliance.
+   *
+   * @param king The king to record.
+   */
+  private void recordKing(final King king) {
+    if (king.getPieceAllegiance().isWhite()) {
+      this.whiteKing = king;
+    } else {
+      this.blackKing = king;
+    }
   }
 
   /**
