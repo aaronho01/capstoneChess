@@ -128,6 +128,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The static exchange evaluation threshold for pruning bad captures. */
   private static final int SEE_PRUNING_THRESHOLD = -20;
 
+  /** The low bits of a packed quiescence ordering key that hold the source index of a capture. */
+  private static final long INDEX_MASK = (1L << 30) - 1;
+
   /** The score of a checkmate delivered at the root, reduced by one for each ply to the mate. */
   public static final double MATE_VALUE = 1000000;
 
@@ -1326,27 +1329,52 @@ public class AlphaBeta extends Observable implements MoveStrategy {
               min(board, 1, alpha, beta, ply + 1);
     }
 
-    List<Move> captures = board.currentPlayer().getLegalMoves().stream()
-            .filter(Move::isAttack)
-            .sorted((m1, m2) -> {
-              boolean isM1Undefended = m1.isAttack() && m1.getAttackedPiece() != null &&
-                      !seeEvaluator.isPieceDefended(m1.getAttackedPiece(), board);
-              boolean isM2Undefended = m2.isAttack() && m2.getAttackedPiece() != null &&
-                      !seeEvaluator.isPieceDefended(m2.getAttackedPiece(), board);
+    final Collection<Move> legalMoves = board.currentPlayer().getLegalMoves();
 
-              if (isM1Undefended != isM2Undefended) {
-                return isM1Undefended ? -1 : 1;
-              }
+    int captureCount = 0;
+    for (Move move : legalMoves) {
+      if (move.isAttack()) {
+        captureCount++;
+      }
+    }
 
-              int see1 = seeEvaluator.evaluate(board, m1);
-              int see2 = seeEvaluator.evaluate(board, m2);
-              return Integer.compare(see2, see1);
-            })
-            .toList();
+    // Both ordering keys are resolved once per capture here. Each of these evaluator calls walks
+    // every piece on the board, so reading them from inside a comparator costs O(n log n) board
+    // scans per node, and the loop below would then scan a third time for every key it uses.
+    final Move[] captures = new Move[captureCount];
+    final int[] captureSeeScores = new int[captureCount];
+    final boolean[] captureUndefended = new boolean[captureCount];
 
-    for (Move move : captures) {
-      final int seeScore = seeEvaluator.evaluate(board, move);
-      final boolean isUndefendedCapture = !seeEvaluator.isPieceDefended(move.getAttackedPiece(), board);
+    int captureIndex = 0;
+    for (Move move : legalMoves) {
+      if (!move.isAttack()) {
+        continue;
+      }
+      final Piece attackedPiece = move.getAttackedPiece();
+      captures[captureIndex] = move;
+      captureSeeScores[captureIndex] = seeEvaluator.evaluate(board, move);
+      captureUndefended[captureIndex] = attackedPiece != null &&
+              !seeEvaluator.isPieceDefended(attackedPiece, board);
+      captureIndex++;
+    }
+
+    // Bit 62 holds the defended flag so undefended captures sort first, bits 30 through 61 hold
+    // the static exchange score negated against Integer.MAX_VALUE so higher scores sort first, and
+    // bits 0 through 29 hold the source index so equal keys keep move generation order. Every key
+    // is non-negative, so sorting the packed values ascending yields the intended move order.
+    final long[] orderKeys = new long[captureCount];
+    for (int i = 0; i < captureCount; i++) {
+      final long defendedBit = captureUndefended[i] ? 0L : 1L;
+      final long descendingSee = (long) Integer.MAX_VALUE - (long) captureSeeScores[i];
+      orderKeys[i] = (defendedBit << 62) | (descendingSee << 30) | i;
+    }
+    Arrays.sort(orderKeys);
+
+    for (final long orderKey : orderKeys) {
+      final int index = (int) (orderKey & INDEX_MASK);
+      final Move move = captures[index];
+      final int seeScore = captureSeeScores[index];
+      final boolean isUndefendedCapture = captureUndefended[index];
 
       board.makeMove(move);
 
