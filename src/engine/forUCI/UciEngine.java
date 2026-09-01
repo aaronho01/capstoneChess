@@ -21,9 +21,9 @@ import java.util.Arrays;
  * carries no chess logic beyond resolving notation into a move and back.
  * <p>
  * Only the commands a self play match needs are implemented: uci, isready, setoption for the Hash
- * and Threads options, ucinewgame, position, go with a node or depth limit, and quit. Anything else
- * is ignored, as the protocol requires. There is no stop command and no infinite search, since the
- * command loop is never reading while a search is running.
+ * and Threads options, ucinewgame, position, go with a node, move time or depth limit, and quit.
+ * Anything else is ignored, as the protocol requires. There is no stop command and no infinite
+ * search, since the command loop is never reading while a search is running.
  * <p>
  * Standard output is the protocol channel and carries nothing but protocol lines. This class holds
  * a private handle to it and redirects {@link System#out} to standard error before anything else
@@ -58,10 +58,10 @@ public class UciEngine {
   /** The largest search thread count the Threads option accepts. */
   private static final int MAXIMUM_THREAD_COUNT = 64;
 
-  /** The iterative deepening ceiling used when a node limit is what ends the search. */
-  private static final int NODE_LIMIT_DEPTH = 64;
+  /** The iterative deepening ceiling used when a node or move time limit ends the search. */
+  private static final int LIMIT_DEPTH = 64;
 
-  /** The node limit used by a go command that names neither a node nor a depth limit. */
+  /** The node limit used by a go command that names no limit of its own. */
   private static final long DEFAULT_NODE_LIMIT = 100_000;
 
   /** The long algebraic notation reported when a search returns no move. */
@@ -201,7 +201,7 @@ public class UciEngine {
    */
   private void newGame() {
     shutdown();
-    this.engine = new AlphaBeta(NODE_LIMIT_DEPTH, this.tableSizeMB, this.threadCount);
+    this.engine = new AlphaBeta(LIMIT_DEPTH, this.tableSizeMB, this.threadCount);
   }
 
   /**
@@ -237,31 +237,41 @@ public class UciEngine {
   }
 
   /**
-   * Searches the current position and reports the depth reached, the score, and the best move. A
-   * go command naming a node limit searches to a fixed ceiling until the limit is reached, one
-   * naming a depth searches to that depth without a node limit, and one naming neither uses the
-   * default node limit. A search that returns no move is reported as the null move with no depth
-   * or score, which is what a terminal position produces. A score holding a checkmate is reported
-   * as a distance to mate rather than in centipawns.
+   * Searches the current position and reports the depth reached, the score, and the best move.
+   * Every limit the command names holds, and the search is stopped by whichever is reached first:
+   * nodes bounds the positions evaluated, movetime bounds the milliseconds spent, and depth bounds
+   * the iterations. A command naming no limit searches under the default node limit. A search that
+   * returns no move is reported as the null move with no depth or score, which is what a terminal
+   * position produces. A score holding a checkmate is reported as a distance to mate rather than
+   * in centipawns.
    *
    * @param tokens The whitespace separated tokens of the command.
    * @throws IllegalArgumentException If a limit is not a number.
    */
   private void go(final String[] tokens) {
     final int nodesIndex = indexOf(tokens, "nodes");
+    final int moveTimeIndex = indexOf(tokens, "movetime");
     final int depthIndex = indexOf(tokens, "depth");
-    long nodeLimit = DEFAULT_NODE_LIMIT;
-    int searchDepth = NODE_LIMIT_DEPTH;
+    long nodeLimit = AlphaBeta.UNLIMITED_NODES;
+    long timeLimitMillis = AlphaBeta.UNLIMITED_TIME;
+    int searchDepth = LIMIT_DEPTH;
+    boolean limited = depthIndex >= 0;
     if (nodesIndex >= 0 && nodesIndex + 1 < tokens.length) {
       nodeLimit = parseLimit(tokens[nodesIndex + 1], "nodes");
-    } else if (depthIndex >= 0) {
-      nodeLimit = AlphaBeta.UNLIMITED_NODES;
+      limited = true;
+    }
+    if (moveTimeIndex >= 0 && moveTimeIndex + 1 < tokens.length) {
+      timeLimitMillis = parseLimit(tokens[moveTimeIndex + 1], "movetime");
+      limited = true;
     }
     if (depthIndex >= 0 && depthIndex + 1 < tokens.length) {
       searchDepth = parseNumber(tokens[depthIndex + 1], "depth");
     }
+    if (!limited) {
+      nodeLimit = DEFAULT_NODE_LIMIT;
+    }
 
-    final Move bestMove = engine().execute(this.board, searchDepth, nodeLimit);
+    final Move bestMove = engine().execute(this.board, searchDepth, nodeLimit, timeLimitMillis);
     final String notation = notationOf(bestMove);
     if (!NULL_MOVE_NOTATION.equals(notation)) {
       final double score = engine().getLastScore();
@@ -299,7 +309,7 @@ public class UciEngine {
    */
   private AlphaBeta engine() {
     if (this.engine == null) {
-      this.engine = new AlphaBeta(NODE_LIMIT_DEPTH, this.tableSizeMB, this.threadCount);
+      this.engine = new AlphaBeta(LIMIT_DEPTH, this.tableSizeMB, this.threadCount);
     }
     return this.engine;
   }
