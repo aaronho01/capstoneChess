@@ -54,10 +54,18 @@ public final class Board {
    */
   private King blackKing;
 
-  /** The player controlling the white pieces on the board. Rebuilt whenever the board is mutated. */
+  /**
+   * The player controlling the white pieces on the board. Rebuilt by {@link #refreshPlayers}
+   * when a move or a null move is applied, and put back from a saved {@link PlayerState} when
+   * one is reversed.
+   */
   private WhitePlayer whitePlayer;
 
-  /** The player controlling the black pieces on the board. Rebuilt whenever the board is mutated. */
+  /**
+   * The player controlling the black pieces on the board. Rebuilt by {@link #refreshPlayers}
+   * when a move or a null move is applied, and put back from a saved {@link PlayerState} when
+   * one is reversed.
+   */
   private BlackPlayer blackPlayer;
 
   /** The player whose turn it currently is to move. */
@@ -91,6 +99,34 @@ public final class Board {
    * other: a move made after a null move must be unmade before that null move is unmade.
    */
   private final Deque<NullMoveUndo> nullMoveUndoStack = new ArrayDeque<>();
+
+  /**
+   * The players that stood on this board before each move applied through
+   * {@link #makeMove(Move)} but not yet unmade, pushed and popped in step with
+   * {@link #undoStack}.
+   */
+  private final Deque<PlayerState> playerUndoStack = new ArrayDeque<>();
+
+  /**
+   * The players that stood on this board before each null move applied through
+   * {@link #makeNullMove()} but not yet unmade, pushed and popped in step with
+   * {@link #nullMoveUndoStack}. Kept separate from {@link #playerUndoStack} so that a null move
+   * and a real move can never restore each other's players.
+   */
+  private final Deque<PlayerState> nullMovePlayerUndoStack = new ArrayDeque<>();
+
+  /**
+   * PlayerState holds the {@link Player} objects that stood on this board before a single
+   * mutation, so that reversing that mutation can put them back rather than build replacements.
+   * A restored player describes the restored position exactly, including any legal move list it
+   * had already computed, because reversing a mutation returns every piece, the en passant pawn,
+   * and both piece lists to the objects and contents the player was built against.
+   *
+   * @param whitePlayer The white player on the board before the mutation.
+   * @param blackPlayer The black player on the board before the mutation.
+   */
+  private record PlayerState(WhitePlayer whitePlayer, BlackPlayer blackPlayer) {
+  }
 
   /**
    * A running count of how many times each Zobrist hash has been reached along the current
@@ -428,7 +464,8 @@ public final class Board {
   /**
    * Applies the given move to this board in place: relocates pieces, updates the Zobrist hash,
    * en passant state, halfmove clock, and transition move, refreshes both players against the
-   * resulting position, and pushes an undo record onto this board's undo stack.
+   * resulting position, and pushes an undo record and the players it replaced onto this board's
+   * undo stacks.
    * <p>
    * The move must have been generated from this exact board, since it carries a reference back
    * to the board it was generated from and reads that board's state while computing its hash
@@ -439,6 +476,7 @@ public final class Board {
   public void makeMove(final Move move) {
     final Alliance nextMover = this.currentPlayer.getOpponent().getAlliance();
     final UndoState undo = move.makeMove(this);
+    this.playerUndoStack.push(new PlayerState(this.whitePlayer, this.blackPlayer));
     refreshPlayers(nextMover);
     this.undoStack.push(undo);
     this.positionCounts.merge(this.zobristHash, 1, Integer::sum);
@@ -447,7 +485,7 @@ public final class Board {
 
   /**
    * Reverses the most recent move applied through {@link #makeMove(Move)}, restoring this
-   * board's pieces and state to exactly what they were beforehand.
+   * board's pieces, state, and players to exactly what they were beforehand.
    *
    * @throws IllegalStateException If no move is on the undo stack to unmake.
    */
@@ -460,8 +498,9 @@ public final class Board {
       this.positionCounts.remove(this.zobristHash);
     }
     final UndoState undo = this.undoStack.pop();
+    final PlayerState priorPlayers = this.playerUndoStack.pop();
     undo.appliedMove().unmakeMove(this, undo);
-    refreshPlayers(undo.priorMoveMaker());
+    restorePlayers(priorPlayers, undo.priorMoveMaker());
     this.plyCount--;
   }
 
@@ -470,7 +509,9 @@ public final class Board {
    * The side to move flips, any en passant opportunity is cleared because it cannot survive a
    * turn in which nothing was played, the halfmove clock advances, and the transition move
    * becomes the null move so that move ordering heuristics keyed on the previous move do not
-   * read a real move that was not actually just played.
+   * read a real move that was not actually just played. Both players are refreshed against the
+   * resulting position and the players they replaced are pushed onto this board's null move
+   * player stack.
    * <p>
    * {@link #positionCounts} is deliberately not touched. A null move position is synthetic and
    * was never reached in a real game, so counting it toward threefold repetition would be wrong.
@@ -489,6 +530,7 @@ public final class Board {
     this.enPassantPawn = null;
     this.halfMoveClock = this.halfMoveClock + 1;
     this.transitionMove = getNullMove();
+    this.nullMovePlayerUndoStack.push(new PlayerState(this.whitePlayer, this.blackPlayer));
     refreshPlayers(nextMover);
     this.nullMoveUndoStack.push(undo);
   }
@@ -504,11 +546,12 @@ public final class Board {
       throw new IllegalStateException("No null move on the undo stack to unmake.");
     }
     final NullMoveUndo undo = this.nullMoveUndoStack.pop();
+    final PlayerState priorPlayers = this.nullMovePlayerUndoStack.pop();
     this.enPassantPawn = undo.priorEnPassantPawn();
     this.zobristHash = undo.priorZobristHash();
     this.halfMoveClock = undo.priorHalfMoveClock();
     this.transitionMove = undo.priorTransitionMove();
-    refreshPlayers(undo.priorMoveMaker());
+    restorePlayers(priorPlayers, undo.priorMoveMaker());
   }
 
   /**
@@ -546,9 +589,10 @@ public final class Board {
 
   /**
    * Reassigns both players and the current player against this board's current piece
-   * configuration. Called after every mutation, since a board mutated in place cannot rely on
-   * a {@link Player} built against an earlier position the way an immutably constructed board
-   * can.
+   * configuration. Called when a board is copied and when a move or a null move is applied,
+   * since a board mutated in place cannot rely on a {@link Player} built against an earlier
+   * position the way an immutably constructed board can. Reversing a move or a null move does
+   * not come through here; it goes through {@link #restorePlayers} instead.
    * <p>
    * Constructing a {@link Player} here no longer computes its full legal move list up front;
    * that generation is deferred to {@link Player#getLegalMoves()} and computed at most once per
@@ -560,6 +604,19 @@ public final class Board {
   private void refreshPlayers(final Alliance moveMaker) {
     this.whitePlayer = new WhitePlayer(this, this.blackPieces);
     this.blackPlayer = new BlackPlayer(this, this.whitePieces);
+    this.currentPlayer = moveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
+  }
+
+  /**
+   * Reassigns both players and the current player from the players that stood on this board
+   * before the mutation being reversed.
+   *
+   * @param priorPlayers The players saved when that mutation was applied.
+   * @param moveMaker The alliance to move in the restored position.
+   */
+  private void restorePlayers(final PlayerState priorPlayers, final Alliance moveMaker) {
+    this.whitePlayer = priorPlayers.whitePlayer();
+    this.blackPlayer = priorPlayers.blackPlayer();
     this.currentPlayer = moveMaker.choosePlayerByAlliance(this.whitePlayer, this.blackPlayer);
   }
 
