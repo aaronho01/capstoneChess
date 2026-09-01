@@ -3,6 +3,7 @@ package engine.forPlayer.forAI;
 import com.google.common.annotations.VisibleForTesting;
 import engine.Alliance;
 import engine.forBoard.Board;
+import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
 import engine.forPiece.*;
 import engine.forPlayer.Player;
@@ -1123,12 +1124,10 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
                                          final Board board,
                                          final Player opponent) {
     double protectionScore = 0;
-    Map<Integer, Integer> squareProtectionCount = new HashMap<>();
+    int[] squareProtectionCount = new int[BoardUtils.NUM_TILES];
 
     for (final Move move : playerMoves) {
-      final int destination = move.getDestinationCoordinate();
-      squareProtectionCount.put(destination,
-              squareProtectionCount.getOrDefault(destination, 0) + 1);
+      squareProtectionCount[move.getDestinationCoordinate()]++;
     }
 
     Map<Integer, List<Move>> opponentAttacks = new HashMap<>();
@@ -1141,7 +1140,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       if (piece.getPieceType() == Piece.PieceType.KING) continue;
 
       final int position = piece.getPiecePosition();
-      final int protectionCount = squareProtectionCount.getOrDefault(position, 0);
+      final int protectionCount = squareProtectionCount[position];
       final List<Move> attacks = opponentAttacks.getOrDefault(position, new ArrayList<>());
 
       if (!attacks.isEmpty()) {
@@ -1229,12 +1228,11 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     final Alliance alliance = player.getAlliance();
 
     int spacePiecesControl = 0;
-    Map<Integer, Integer> controlledSquares = new HashMap<>();
+    int[] controlledSquares = new int[BoardUtils.NUM_TILES];
 
     for (final Move move : playerMoves) {
       final int destination = move.getDestinationCoordinate();
-      controlledSquares.put(destination,
-              controlledSquares.getOrDefault(destination, 0) + 1);
+      controlledSquares[destination]++;
 
       final int rank = destination / 8;
       final int file = destination % 8;
@@ -1268,7 +1266,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
 
     final int[] keySquares = {27, 28, 35, 36};
     for (final int square : keySquares) {
-      spaceScore += controlledSquares.getOrDefault(square, 0) * 5;
+      spaceScore += controlledSquares[square] * 5;
     }
 
     return spaceScore;

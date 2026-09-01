@@ -3,6 +3,7 @@ package engine.forPlayer.forAI;
 import com.google.common.annotations.VisibleForTesting;
 import engine.Alliance;
 import engine.forBoard.Board;
+import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
 import engine.forPiece.*;
 import engine.forPlayer.Player;
@@ -1485,25 +1486,23 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
     final Collection<Move> playerMoves = player.getLegalMoves();
     final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
 
-    Map<Integer, Integer> defenseCount = new HashMap<>();
-    Map<Integer, Integer> attackCount = new HashMap<>();
+    int[] defenseCount = new int[BoardUtils.NUM_TILES];
+    int[] attackCount = new int[BoardUtils.NUM_TILES];
 
     for (final Move move : playerMoves) {
-      defenseCount.put(move.getDestinationCoordinate(),
-              defenseCount.getOrDefault(move.getDestinationCoordinate(), 0) + 1);
+      defenseCount[move.getDestinationCoordinate()]++;
     }
 
     for (final Move move : opponentMoves) {
-      attackCount.put(move.getDestinationCoordinate(),
-              attackCount.getOrDefault(move.getDestinationCoordinate(), 0) + 1);
+      attackCount[move.getDestinationCoordinate()]++;
     }
 
     for (final Piece piece : playerPieces) {
       if (piece.getPieceType() == Piece.PieceType.KING) continue;
 
       final int position = piece.getPiecePosition();
-      final int attacks = attackCount.getOrDefault(position, 0);
-      final int defenses = defenseCount.getOrDefault(position, 0);
+      final int attacks = attackCount[position];
+      final int defenses = defenseCount[position];
 
       if (attacks > 0) {
         if (defenses == 0) {

@@ -3,6 +3,7 @@ package engine.forPlayer.forAI;
 import com.google.common.annotations.VisibleForTesting;
 import engine.Alliance;
 import engine.forBoard.Board;
+import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
 import engine.forPiece.*;
 import engine.forPlayer.Player;
@@ -250,19 +251,17 @@ public class OpeningGameEvaluator implements BoardEvaluator {
       }
     }
 
-    Map<Integer, Integer> controlledSquares = new HashMap<>();
+    int[] controlledSquares = new int[BoardUtils.NUM_TILES];
     for (Move move : playerMoves) {
-      int destination = move.getDestinationCoordinate();
-      controlledSquares.put(destination,
-              controlledSquares.getOrDefault(destination, 0) + 1);
+      controlledSquares[move.getDestinationCoordinate()]++;
     }
 
     for (int centralSquare : centralSquares) {
-      score += controlledSquares.getOrDefault(centralSquare, 0) * 15;
+      score += controlledSquares[centralSquare] * 15;
     }
 
     for (int extendedSquare : extendedCenterSquares) {
-      score += controlledSquares.getOrDefault(extendedSquare, 0) * 5;
+      score += controlledSquares[extendedSquare] * 5;
     }
 
     int centerPawns = 0;
@@ -676,17 +675,15 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     Collection<Piece> playerPieces = player.getActivePieces();
     Collection<Move> playerMoves = player.getLegalMoves();
 
-    Map<Integer, Integer> protectedSquares = new HashMap<>();
+    int[] protectedSquares = new int[BoardUtils.NUM_TILES];
 
     for (Move move : playerMoves) {
-      int destination = move.getDestinationCoordinate();
-      protectedSquares.put(destination,
-              protectedSquares.getOrDefault(destination, 0) + 1);
+      protectedSquares[move.getDestinationCoordinate()]++;
     }
 
     for (Piece piece : playerPieces) {
       int position = piece.getPiecePosition();
-      if (protectedSquares.getOrDefault(position, 0) > 0) {
+      if (protectedSquares[position] > 0) {
         score += 10;
 
         if (piece.getPieceType() == Piece.PieceType.KNIGHT ||
