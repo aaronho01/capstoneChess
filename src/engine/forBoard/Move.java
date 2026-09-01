@@ -4,8 +4,6 @@ import engine.forPiece.Pawn;
 import engine.forPiece.Piece;
 import engine.forPiece.Rook;
 
-import java.util.Objects;
-
 /**
  * The Move class represents a move in a game of chess.
  * This abstract class provides the base functionality for all types of chess moves,
@@ -114,7 +112,9 @@ public abstract class Move {
    */
   @Override
   public final int hashCode() {
-    return Objects.hash(getCurrentCoordinate(), getDestinationCoordinate(), promotionType());
+    final Piece.PieceType promotion = promotionType();
+    return ((getCurrentCoordinate() + 1) << 9) | (getDestinationCoordinate() << 3) |
+            (promotion == null ? 0 : promotion.ordinal() + 1);
   }
 
   /**
