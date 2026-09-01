@@ -86,6 +86,15 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The node limit that lets a search run to the depth it was asked for. */
   public static final long UNLIMITED_NODES = Long.MAX_VALUE;
 
+  /** The time limit in milliseconds that lets a search run to the depth it was asked for. */
+  public static final long UNLIMITED_TIME = Long.MAX_VALUE;
+
+  /** The deadline held by a search that is not under a time limit. */
+  private static final long NO_DEADLINE = Long.MAX_VALUE;
+
+  /** The mask a node count is tested against to decide whether the clock is read. */
+  private static final long TIME_CHECK_MASK = 1023;
+
   /** Maximum search depth supported by data structures. */
   private static final int MAX_SEARCH_DEPTH = 100;
 
@@ -390,18 +399,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
   /**
    * Executes the alpha-beta search algorithm with iterative deepening to find the best move for
-   * the current player, to the given depth.
-   * <p>
-   * The calling thread is the main search thread and its result is the one returned. Every other
-   * search thread runs its own independent iterative deepening over a private copy of the position
-   * and its results are discarded, so the only thing those threads contribute is the entries they
-   * leave in the shared transposition table. They are stopped as soon as the main search finishes,
-   * and this method does not return until they have.
-   * <p>
-   * A search that reaches the node limit is stopped where it stands and the iteration it was in
-   * the middle of is discarded, so the move and score returned are those of the deepest iteration
-   * that finished. The first iteration is never held to the limit, so a finished iteration always
-   * exists.
+   * the current player, to the given depth and under no time limit.
    *
    * @param board The current chess board position.
    * @param searchDepth The maximum depth for iterative deepening on this search.
@@ -410,7 +408,39 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * @return The best move determined by the search algorithm.
    */
   public Move execute(final Board board, final int searchDepth, final long nodeLimit) {
+    return execute(board, searchDepth, nodeLimit, UNLIMITED_TIME);
+  }
+
+  /**
+   * Executes the alpha-beta search algorithm with iterative deepening to find the best move for
+   * the current player, to the given depth.
+   * <p>
+   * The calling thread is the main search thread and its result is the one returned. Every other
+   * search thread runs its own independent iterative deepening over a private copy of the position
+   * and its results are discarded, so the only thing those threads contribute is the entries they
+   * leave in the shared transposition table. They are stopped as soon as the main search finishes,
+   * and this method does not return until they have.
+   * <p>
+   * A search that reaches the node limit or the time limit is stopped where it stands and the
+   * iteration it was in the middle of is discarded, so the move and score returned are those of
+   * the deepest iteration that finished. The first iteration is held to neither limit, so a
+   * finished iteration always exists.
+   * <p>
+   * The clock is not read at every node, so a search under a time limit runs somewhat past its
+   * deadline rather than stopping on it.
+   *
+   * @param board The current chess board position.
+   * @param searchDepth The maximum depth for iterative deepening on this search.
+   * @param nodeLimit The number of positions to evaluate before the search is stopped, or
+   *                  UNLIMITED_NODES to run every iteration to its end.
+   * @param timeLimitMillis The milliseconds to search for before the search is stopped, or
+   *                        UNLIMITED_TIME to run every iteration to its end.
+   * @return The best move determined by the search algorithm.
+   */
+  public Move execute(final Board board, final int searchDepth, final long nodeLimit,
+                      final long timeLimitMillis) {
     final long startTime = System.currentTimeMillis();
+    final long deadline = deadlineOf(timeLimitMillis);
     Move bestMove = MoveFactory.getNullMove();
     double bestScore = 0;
     int bestDepth = 0;
@@ -433,6 +463,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       for (int currentDepth = 1; currentDepth <= searchDepth && !searchStopped; currentDepth++) {
         stats.quiescenceCount = 0;
         stats.nodeLimit = currentDepth == 1 ? UNLIMITED_NODES : nodeLimit;
+        stats.deadline = currentDepth == 1 ? NO_DEADLINE : deadline;
 
         final RootResult result = currentDepth >= 4 ?
                 searchRootAspirationWindow(mainBoard, currentDepth, bestMove, bestScore) :
@@ -473,6 +504,36 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     this.lastDepth = bestDepth;
 
     return bestMove;
+  }
+
+  /**
+   * Returns the point in time a search under the given time limit is stopped at.
+   *
+   * @param timeLimitMillis The milliseconds the search may run for, or UNLIMITED_TIME to run
+   *                        without a deadline.
+   * @return The deadline as a reading of {@link System#nanoTime()}, or NO_DEADLINE if the search
+   *         is not under a time limit.
+   */
+  private static long deadlineOf(final long timeLimitMillis) {
+    if (timeLimitMillis >= UNLIMITED_TIME / 1_000_000L) {
+      return NO_DEADLINE;
+    }
+    return System.nanoTime() + timeLimitMillis * 1_000_000L;
+  }
+
+  /**
+   * Reports whether a search thread has reached the node limit or the deadline it is searching
+   * under. The clock is read only on the node counts the check mask selects, so a deadline is
+   * noticed a little after it passes.
+   *
+   * @param stats The statistics of the calling thread, holding its limits and its node count.
+   * @return True if the search should be stopped.
+   */
+  private static boolean limitReached(final SearchStats stats) {
+    if (stats.boardsEvaluated >= stats.nodeLimit) {
+      return true;
+    }
+    return (stats.boardsEvaluated & TIME_CHECK_MASK) == 0 && System.nanoTime() >= stats.deadline;
   }
 
   /**
@@ -823,7 +884,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double max(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
-    if (stats.boardsEvaluated >= stats.nodeLimit) {
+    if (limitReached(stats)) {
       this.searchStopped = true;
     }
 
@@ -1013,7 +1074,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double min(final Board board, int depth, double alpha, double beta, int ply) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
-    if (stats.boardsEvaluated >= stats.nodeLimit) {
+    if (limitReached(stats)) {
       this.searchStopped = true;
     }
 
@@ -1202,7 +1263,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   private double quiescenceSearch(Board board, double alpha, double beta, int ply, boolean maximizing) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
-    if (stats.boardsEvaluated >= stats.nodeLimit) {
+    if (limitReached(stats)) {
       this.searchStopped = true;
     }
 
@@ -1383,6 +1444,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     int quiescenceCount;
     /** The node count at which this thread stops the search. */
     long nodeLimit = UNLIMITED_NODES;
+    /** The reading of {@link System#nanoTime()} at which this thread stops the search. */
+    long deadline = NO_DEADLINE;
   }
 
   /**
