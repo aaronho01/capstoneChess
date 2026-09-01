@@ -26,11 +26,14 @@ public final class Rook extends Piece {
   /** An array of possible movement offsets for a rook, representing vertical and horizontal directions. */
   private static final int[] CANDIDATE_MOVE_COORDINATES = { -8, -1, 1, 8 };
 
-  /** A map that stores precomputed legal move lines for each tile on the board for rook movement patterns. */
-  private static final Map<Integer, Line[]> PRECOMPUTED_CANDIDATES = computeCandidates();
-
   /** An empty array used as a default value when creating arrays of Line objects. */
   private static final Line[] EMPTY_LINES_ARRAY = new Line[0];
+
+  /**
+   * An array, indexed by tile coordinate, of the precomputed legal move lines for rook movement
+   * patterns. This field must be declared after EMPTY_LINES_ARRAY, which its initializer reads.
+   */
+  private static final Line[][] PRECOMPUTED_CANDIDATES = computeCandidates();
 
   /**
    * Constructs a rook chess piece with the given alliance, starting position, and number of moves.
@@ -64,10 +67,11 @@ public final class Rook extends Piece {
    * This method generates all possible horizontal and vertical movement patterns for rooks,
    * taking into account board boundaries and edge exclusions.
    *
-   * @return A map containing the precomputed legal move lines for each tile on the board.
+   * @return An array, indexed by tile coordinate, containing the precomputed legal move lines
+   *         for each tile on the board.
    */
-  private static Map<Integer, Line[]> computeCandidates() {
-    Map<Integer, Line[]> candidates = new HashMap<>();
+  private static Line[][] computeCandidates() {
+    Line[][] candidates = new Line[BoardUtils.NUM_TILES][];
     for (int position = 0; position < BoardUtils.NUM_TILES; position++) {
       List<Line> lines = new ArrayList<>();
       for (int offset : CANDIDATE_MOVE_COORDINATES) {
@@ -86,11 +90,9 @@ public final class Rook extends Piece {
           lines.add(line);
         }
       }
-      if (!lines.isEmpty()) {
-        candidates.put(position, lines.toArray(EMPTY_LINES_ARRAY != null ? EMPTY_LINES_ARRAY : new Line[0]));
-      }
+      candidates[position] = lines.toArray(EMPTY_LINES_ARRAY);
     }
-    return Collections.unmodifiableMap(candidates);
+    return candidates;
   }
 
   /**
@@ -103,7 +105,7 @@ public final class Rook extends Piece {
   @Override
   public Collection<Move> calculateLegalMoves(final Board board) {
     final List<Move> legalMoves = new ArrayList<>();
-    for (final Line line : PRECOMPUTED_CANDIDATES.get(this.piecePosition)) {
+    for (final Line line : PRECOMPUTED_CANDIDATES[this.piecePosition]) {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
         final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
         if (pieceAtDestination == null) {
@@ -131,10 +133,7 @@ public final class Rook extends Piece {
    */
   @Override
   public boolean defendsSquare(final int targetSquare, final Board board) {
-    final Line[] lines = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
-    if (lines == null) {
-      return false;
-    }
+    final Line[] lines = PRECOMPUTED_CANDIDATES[this.piecePosition];
     for (final Line line : lines) {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
         if (candidateDestinationCoordinate == targetSquare) {

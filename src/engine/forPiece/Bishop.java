@@ -27,8 +27,8 @@ public final class Bishop extends Piece {
   /** The diagonal direction offsets representing all possible bishop moves from any position. */
   private final static int[] CANDIDATE_MOVE_COORDINATES = { -9, -7, 7, 9 };
 
-  /** A cache of precomputed legal move lines for each tile position on the board. */
-  private final static Map<Integer, Line[]> PRECOMPUTED_CANDIDATES = computeCandidates();
+  /** A cache of precomputed legal move lines, indexed by tile position on the board. */
+  private final static Line[][] PRECOMPUTED_CANDIDATES = computeCandidates();
 
   /**
    * Constructs a new Bishop with the specified alliance, position, and move count.
@@ -64,10 +64,10 @@ public final class Bishop extends Piece {
    * This optimization allows for efficient move generation by calculating move patterns
    * once at initialization rather than during gameplay.
    *
-   * @return An unmodifiable map of board positions to their corresponding diagonal move lines.
+   * @return An array, indexed by board position, of the corresponding diagonal move lines.
    */
-  private static Map<Integer, Line[]> computeCandidates() {
-    Map<Integer, Line[]> candidates = new HashMap<>();
+  private static Line[][] computeCandidates() {
+    Line[][] candidates = new Line[BoardUtils.NUM_TILES][];
     for (int position = 0; position < BoardUtils.NUM_TILES; position++) {
       List<Line> lines = new ArrayList<>();
       for (int offset : CANDIDATE_MOVE_COORDINATES) {
@@ -87,11 +87,9 @@ public final class Bishop extends Piece {
           lines.add(line);
         }
       }
-      if (!lines.isEmpty()) {
-        candidates.put(position, lines.toArray(new Line[0]));
-      }
+      candidates[position] = lines.toArray(new Line[0]);
     }
-    return Collections.unmodifiableMap(candidates);
+    return candidates;
   }
 
   /**
@@ -105,7 +103,7 @@ public final class Bishop extends Piece {
   @Override
   public Collection<Move> calculateLegalMoves(final Board board) {
     final List<Move> legalMoves = new ArrayList<>();
-    for (final Line line : PRECOMPUTED_CANDIDATES.get(this.piecePosition)) {
+    for (final Line line : PRECOMPUTED_CANDIDATES[this.piecePosition]) {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
         final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
         if (pieceAtDestination == null) {
@@ -135,10 +133,7 @@ public final class Bishop extends Piece {
    */
   @Override
   public boolean defendsSquare(final int targetSquare, final Board board) {
-    final Line[] lines = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
-    if (lines == null) {
-      return false;
-    }
+    final Line[] lines = PRECOMPUTED_CANDIDATES[this.piecePosition];
     for (final Line line : lines) {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
         if (candidateDestinationCoordinate == targetSquare) {

@@ -25,11 +25,10 @@ public final class King extends Piece {
   private final static int[] CANDIDATE_MOVE_COORDINATES = { -9, -8, -7, -1, 1, 7, 8, 9 };
 
   /**
-   * A precomputed map storing legal move offsets for each board position.
-   * Keys represent tile coordinates and values contain arrays of valid destination offsets,
-   * accounting for board edge restrictions.
+   * A precomputed array, indexed by board position, of the legal move offsets available from
+   * each tile, accounting for board edge restrictions.
    */
-  private final static Map<Integer, int[]> PRECOMPUTED_CANDIDATES = computeCandidates();
+  private final static int[][] PRECOMPUTED_CANDIDATES = computeCandidates();
 
   /** Indicates whether this king has completed a castling move. */
   private final boolean isCastled;
@@ -86,10 +85,11 @@ public final class King extends Piece {
    * This method calculates valid king moves for all 64 squares, excluding
    * moves that would place the king off the board or violate edge constraints.
    *
-   * @return A map containing precomputed legal move offsets for each board position.
+   * @return An array, indexed by board position, containing the precomputed legal move offsets
+   *         for each board position.
    */
-  private static Map<Integer, int[]> computeCandidates() {
-    final Map<Integer, int[]> candidates = new HashMap<>();
+  private static int[][] computeCandidates() {
+    final int[][] candidates = new int[BoardUtils.NUM_TILES][];
     for (int position = 0; position < BoardUtils.NUM_TILES; position++) {
       int[] legalOffsets = new int[CANDIDATE_MOVE_COORDINATES.length];
       int numLegalOffsets = 0;
@@ -103,11 +103,9 @@ public final class King extends Piece {
           legalOffsets[numLegalOffsets++] = offset;
         }
       }
-      if (numLegalOffsets > 0) {
-        candidates.put(position, Arrays.copyOf(legalOffsets, numLegalOffsets));
-      }
+      candidates[position] = Arrays.copyOf(legalOffsets, numLegalOffsets);
     }
-    return Collections.unmodifiableMap(candidates);
+    return candidates;
   }
 
   /**
@@ -148,7 +146,7 @@ public final class King extends Piece {
   @Override
   public Collection<Move> calculateLegalMoves(final Board board) {
     final List<Move> legalMoves = new ArrayList<>();
-    for (final int currentCandidateOffset: PRECOMPUTED_CANDIDATES.get(this.piecePosition)) {
+    for (final int currentCandidateOffset: PRECOMPUTED_CANDIDATES[this.piecePosition]) {
       final int candidateDestinationCoordinate = this.piecePosition + currentCandidateOffset;
       final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
       if (pieceAtDestination == null) {
@@ -175,10 +173,7 @@ public final class King extends Piece {
    */
   @Override
   public boolean defendsSquare(final int targetSquare, final Board board) {
-    final int[] candidates = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
-    if (candidates == null) {
-      return false;
-    }
+    final int[] candidates = PRECOMPUTED_CANDIDATES[this.piecePosition];
     for (final int currentCandidateOffset : candidates) {
       final int candidateDestinationCoordinate = this.piecePosition + currentCandidateOffset;
       if (candidateDestinationCoordinate == targetSquare) {

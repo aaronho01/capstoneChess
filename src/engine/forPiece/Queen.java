@@ -27,11 +27,14 @@ public final class Queen extends Piece {
   /** Array of coordinate offsets representing all possible queen movement directions. */
   private static final int[] CANDIDATE_MOVE_COORDINATES = { -9, -8, -7, -1, 1, 7, 8, 9 };
 
-  /** Map containing precomputed movement lines for each board position to optimize move calculation. */
-  private static final Map<Integer, MoveUtils.Line[]> PRECOMPUTED_CANDIDATES = computeCandidates();
-
   /** Empty array constant used when no movement lines are available for a position. */
   private static final MoveUtils.Line[] EMPTY_LINES_ARRAY = new MoveUtils.Line[0];
+
+  /**
+   * An array, indexed by board position, of the precomputed movement lines available from that
+   * position. This field must be declared after EMPTY_LINES_ARRAY, which its initializer reads.
+   */
+  private static final MoveUtils.Line[][] PRECOMPUTED_CANDIDATES = computeCandidates();
 
   /**
    * Constructs a queen chess piece with the specified alliance, position, and move count.
@@ -65,10 +68,11 @@ public final class Queen extends Piece {
    * This method calculates valid queen movements considering board boundaries and edge case
    * exclusions to optimize runtime move generation performance.
    *
-   * @return An unmodifiable map of position indices to arrays of movement lines.
+   * @return An array, indexed by position, of the arrays of movement lines available from that
+   *         position.
    */
-  private static Map<Integer, MoveUtils.Line[]> computeCandidates() {
-    Map<Integer, MoveUtils.Line[]> candidates = new HashMap<>();
+  private static MoveUtils.Line[][] computeCandidates() {
+    MoveUtils.Line[][] candidates = new MoveUtils.Line[BoardUtils.NUM_TILES][];
     for (int position = 0; position < BoardUtils.NUM_TILES; position++) {
       List<MoveUtils.Line> lines = new ArrayList<>();
       for (int offset : CANDIDATE_MOVE_COORDINATES) {
@@ -87,11 +91,9 @@ public final class Queen extends Piece {
           lines.add(line);
         }
       }
-      if (!lines.isEmpty()) {
-        candidates.put(position, lines.toArray(EMPTY_LINES_ARRAY != null ? EMPTY_LINES_ARRAY : new MoveUtils.Line[0]));
-      }
+      candidates[position] = lines.toArray(EMPTY_LINES_ARRAY);
     }
-    return Collections.unmodifiableMap(candidates);
+    return candidates;
   }
 
   /**
@@ -105,7 +107,7 @@ public final class Queen extends Piece {
   @Override
   public Collection<Move> calculateLegalMoves(final Board board) {
     final List<Move> legalMoves = new ArrayList<>();
-    for (final MoveUtils.Line line : PRECOMPUTED_CANDIDATES.get(this.piecePosition)) {
+    for (final MoveUtils.Line line : PRECOMPUTED_CANDIDATES[this.piecePosition]) {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
         final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
         if (pieceAtDestination == null) {
@@ -134,10 +136,7 @@ public final class Queen extends Piece {
    */
   @Override
   public boolean defendsSquare(final int targetSquare, final Board board) {
-    final MoveUtils.Line[] lines = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
-    if (lines == null) {
-      return false;
-    }
+    final MoveUtils.Line[] lines = PRECOMPUTED_CANDIDATES[this.piecePosition];
     for (final MoveUtils.Line line : lines) {
       for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
         if (candidateDestinationCoordinate == targetSquare) {

@@ -24,10 +24,10 @@ public final class Knight extends Piece {
   private final static int[] CANDIDATE_MOVE_COORDINATES = { -17, -15, -10, -6, 6, 10, 15, 17 };
 
   /**
-   * A map that stores the precomputed legal move offsets for each tile on the board,
-   * taking edge cases into consideration.
+   * An array, indexed by tile coordinate, of the precomputed legal destination squares for
+   * each tile on the board, taking edge cases into consideration.
    */
-  private final static Map<Integer, int[]> PRECOMPUTED_CANDIDATES = computeCandidates();
+  private final static int[][] PRECOMPUTED_CANDIDATES = computeCandidates();
 
   /**
    * Constructs a new Knight instance with the given alliance, piece position, and number of moves.
@@ -58,13 +58,14 @@ public final class Knight extends Piece {
   }
 
   /**
-   * Computes and precomputes the legal move offsets for each tile on the board for the knight.
-   * Takes edge cases to exclude illegal move offsets into consideration.
+   * Computes and precomputes the legal destination squares for each tile on the board for the
+   * knight. Takes edge cases to exclude illegal move offsets into consideration.
    *
-   * @return A map containing the precomputed legal move offsets for each tile on the board.
+   * @return An array, indexed by tile coordinate, containing the precomputed legal destination
+   *         squares for each tile on the board.
    */
-  private static Map<Integer, int[]> computeCandidates() {
-    final Map<Integer, int[]> candidates = new HashMap<>();
+  private static int[][] computeCandidates() {
+    final int[][] candidates = new int[BoardUtils.NUM_TILES][];
     for (int position = 0; position < BoardUtils.NUM_TILES; position++) {
       final int[] legalOffsets = new int[CANDIDATE_MOVE_COORDINATES.length];
       int numLegalMoves = 0;
@@ -80,9 +81,9 @@ public final class Knight extends Piece {
           legalOffsets[numLegalMoves++] = destination;
         }
       }
-      candidates.put(position, Arrays.copyOf(legalOffsets, numLegalMoves));
+      candidates[position] = Arrays.copyOf(legalOffsets, numLegalMoves);
     }
-    return Collections.unmodifiableMap(candidates);
+    return candidates;
   }
 
   /**
@@ -94,7 +95,7 @@ public final class Knight extends Piece {
   @Override
   public Collection<Move> calculateLegalMoves(final Board board) {
     final List<Move> legalMoves = new ArrayList<>();
-    for (final int candidateDestinationCoordinate: PRECOMPUTED_CANDIDATES.get(this.piecePosition)) {
+    for (final int candidateDestinationCoordinate: PRECOMPUTED_CANDIDATES[this.piecePosition]) {
       final Piece pieceAtDestination = board.getPiece(candidateDestinationCoordinate);
       if (pieceAtDestination == null) {
         legalMoves.add(new Move.MajorMove(board, this, candidateDestinationCoordinate));
@@ -120,10 +121,7 @@ public final class Knight extends Piece {
    */
   @Override
   public boolean defendsSquare(final int targetSquare, final Board board) {
-    final int[] candidates = PRECOMPUTED_CANDIDATES.get(this.piecePosition);
-    if (candidates == null) {
-      return false;
-    }
+    final int[] candidates = PRECOMPUTED_CANDIDATES[this.piecePosition];
     for (final int candidateDestinationCoordinate : candidates) {
       if (candidateDestinationCoordinate == targetSquare) {
         return true;
