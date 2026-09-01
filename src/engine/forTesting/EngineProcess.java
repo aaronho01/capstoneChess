@@ -161,18 +161,18 @@ public class EngineProcess implements AutoCloseable {
   }
 
   /**
-   * Searches the current position under a node limit and reads the reply. Every information line
-   * the engine writes before its move is read, and the fields of the last one reporting a depth or
-   * a score are the ones the reply holds. Fields this class does not know are passed over.
+   * Searches the current position under a limit and reads the reply. Every information line the
+   * engine writes before its move is read, and the fields of the last one reporting a depth or a
+   * score are the ones the reply holds. Fields this class does not know are passed over.
    *
-   * @param nodeLimit The largest number of nodes the search may visit.
+   * @param limit What stops the search.
    * @return The move the engine chose, the depth and score it reported, and the time the search
    *         took.
    * @throws Fault If the engine does not report a move before the timeout.
    */
-  public Reply go(final long nodeLimit) {
+  public Reply go(final Limit limit) {
     final long start = System.nanoTime();
-    send("go nodes " + nodeLimit);
+    send("go" + limit.fields());
     Integer depth = null;
     Integer score = null;
     Integer mateIn = null;
@@ -430,6 +430,83 @@ public class EngineProcess implements AutoCloseable {
     }, this.name + "-log");
     drain.setDaemon(true);
     drain.start();
+  }
+
+  /**
+   * The Limit record holds what stops one search. A limit names a node count, a move time, or
+   * both, and a search under both is stopped by whichever is reached first.
+   *
+   * @param nodes The largest number of nodes the search may visit, or UNLIMITED to hold the
+   *              search to its move time alone.
+   * @param moveTimeMillis The longest the search may run for, or UNLIMITED to hold the search to
+   *                       its node count alone.
+   */
+  public record Limit(long nodes, long moveTimeMillis) {
+
+    /** The value naming a measure this limit does not hold. */
+    public static final long UNLIMITED = Long.MAX_VALUE;
+
+    /**
+     * Constructs a limit naming a node count, a move time, or both.
+     *
+     * @throws IllegalArgumentException If the limit names neither a node count nor a move time.
+     */
+    public Limit {
+      if (nodes == UNLIMITED && moveTimeMillis == UNLIMITED) {
+        throw new IllegalArgumentException("A limit must name a node count or a move time");
+      }
+    }
+
+    /**
+     * Returns a limit holding a search to a number of nodes.
+     *
+     * @param nodes The largest number of nodes the search may visit.
+     * @return The limit that node count states.
+     */
+    public static Limit ofNodes(final long nodes) {
+      return new Limit(nodes, UNLIMITED);
+    }
+
+    /**
+     * Returns a limit holding a search to a length of time.
+     *
+     * @param moveTimeMillis The longest the search may run for, in milliseconds.
+     * @return The limit that move time states.
+     */
+    public static Limit ofMoveTime(final long moveTimeMillis) {
+      return new Limit(UNLIMITED, moveTimeMillis);
+    }
+
+    /**
+     * Describes this limit as it is reported to a reader.
+     *
+     * @return The measures this limit holds, named and separated by the word and.
+     */
+    public String description() {
+      if (this.nodes == UNLIMITED) {
+        return this.moveTimeMillis + " ms";
+      }
+      if (this.moveTimeMillis == UNLIMITED) {
+        return this.nodes + " nodes";
+      }
+      return this.nodes + " nodes and " + this.moveTimeMillis + " ms";
+    }
+
+    /**
+     * Renders this limit as the fields following a go command, each led by a space.
+     *
+     * @return The fields naming this limit.
+     */
+    private String fields() {
+      final StringBuilder fields = new StringBuilder();
+      if (this.nodes != UNLIMITED) {
+        fields.append(" nodes ").append(this.nodes);
+      }
+      if (this.moveTimeMillis != UNLIMITED) {
+        fields.append(" movetime ").append(this.moveTimeMillis);
+      }
+      return fields.toString();
+    }
   }
 
   /**

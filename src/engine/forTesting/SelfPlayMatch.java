@@ -32,8 +32,9 @@ import java.util.concurrent.Executors;
  * Forsyth-Edwards Notation. Replaying the whole game is what gives each engine the repetition
  * history a game actually has, which its own draw detection depends on.
  * <p>
- * Each engine searches under its own node limit, which the command line sets for both engines at
- * once or for one engine at a time.
+ * Each engine searches under its own limit, a node count or a move time, which the command line
+ * sets for both engines at once or for one engine at a time. A match is played under one kind of
+ * limit throughout, since a node count and a move time do not measure the same thing.
  * <p>
  * Search threads are fixed at one for both engines. A node limit is only a meaningful measure of
  * equal effort while one thread is searching, since helper threads contribute nodes that the limit
@@ -300,13 +301,13 @@ public class SelfPlayMatch {
       final boolean engineAIsWhite = game == 0;
       final EngineProcess white = engineAIsWhite ? engineA : engineB;
       final EngineProcess black = engineAIsWhite ? engineB : engineA;
-      final long whiteNodeLimit = engineAIsWhite ? settings.nodeLimitA() : settings.nodeLimitB();
-      final long blackNodeLimit = engineAIsWhite ? settings.nodeLimitB() : settings.nodeLimitA();
+      final EngineProcess.Limit whiteLimit = engineAIsWhite ? settings.limitA() : settings.limitB();
+      final EngineProcess.Limit blackLimit = engineAIsWhite ? settings.limitB() : settings.limitA();
       final SearchTotals whiteTotals = engineAIsWhite ? totalsA : totalsB;
       final SearchTotals blackTotals = engineAIsWhite ? totalsB : totalsA;
       final long start = System.nanoTime();
-      final Result result = play(settings, line.opening(), white, black, whiteNodeLimit,
-              blackNodeLimit, whiteTotals, blackTotals, report);
+      final Result result = play(settings, line.opening(), white, black, whiteLimit,
+              blackLimit, whiteTotals, blackTotals, report);
       final long elapsedMillis = (System.nanoTime() - start) / 1_000_000L;
       reportGame(report, game + 1, engineAIsWhite, result, elapsedMillis, settings.verbose());
       if (result.outcome() == Outcome.FAILURE) {
@@ -359,8 +360,8 @@ public class SelfPlayMatch {
    *                position.
    * @param white The engine playing White.
    * @param black The engine playing Black.
-   * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
-   * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
+   * @param whiteLimit What stops a search by White.
+   * @param blackLimit What stops a search by Black.
    * @param whiteTotals The totals the searches White carries out are folded into.
    * @param blackTotals The totals the searches Black carries out are folded into.
    * @param report The lines reporting the pair, which this method appends to when the match is
@@ -369,7 +370,8 @@ public class SelfPlayMatch {
    */
   public static Result play(final Settings settings, final OpeningBook.Opening opening,
                             final EngineProcess white, final EngineProcess black,
-                            final long whiteNodeLimit, final long blackNodeLimit,
+                            final EngineProcess.Limit whiteLimit,
+                            final EngineProcess.Limit blackLimit,
                             final SearchTotals whiteTotals, final SearchTotals blackTotals,
                             final List<String> report) {
     final List<String> moves = new ArrayList<>();
@@ -380,7 +382,7 @@ public class SelfPlayMatch {
     try {
       white.newGame();
       black.newGame();
-      return playMoves(settings, board, moves, white, black, whiteNodeLimit, blackNodeLimit,
+      return playMoves(settings, board, moves, white, black, whiteLimit, blackLimit,
               whiteTotals, blackTotals, report);
     } catch (final EngineProcess.Fault fault) {
       return new Result(Outcome.FAILURE, fault.getMessage(), moves);
@@ -409,8 +411,8 @@ public class SelfPlayMatch {
    * @param moves The moves played so far, which this method appends to.
    * @param white The engine playing White.
    * @param black The engine playing Black.
-   * @param whiteNodeLimit The largest number of nodes a search by White may visit for one move.
-   * @param blackNodeLimit The largest number of nodes a search by Black may visit for one move.
+   * @param whiteLimit What stops a search by White.
+   * @param blackLimit What stops a search by Black.
    * @param whiteTotals The totals the searches White carries out are folded into.
    * @param blackTotals The totals the searches Black carries out are folded into.
    * @param report The lines reporting the pair, which this method appends to when the match is
@@ -420,8 +422,10 @@ public class SelfPlayMatch {
    */
   private static Result playMoves(final Settings settings, final Board board,
                                   final List<String> moves, final EngineProcess white,
-                                  final EngineProcess black, final long whiteNodeLimit,
-                                  final long blackNodeLimit, final SearchTotals whiteTotals,
+                                  final EngineProcess black,
+                                  final EngineProcess.Limit whiteLimit,
+                                  final EngineProcess.Limit blackLimit,
+                                  final SearchTotals whiteTotals,
                                   final SearchTotals blackTotals, final List<String> report) {
     final Adjudicator adjudicator = new Adjudicator(settings.adjudicate(),
             settings.resignScore(), settings.resignPlies(), settings.drawScore(),
@@ -446,7 +450,7 @@ public class SelfPlayMatch {
       final String moverName = "the " + mover.getName() + " engine, playing " +
               (whiteToMove ? "White" : "Black") + ",";
       mover.setPosition(moves);
-      final EngineProcess.Reply reply = mover.go(whiteToMove ? whiteNodeLimit : blackNodeLimit);
+      final EngineProcess.Reply reply = mover.go(whiteToMove ? whiteLimit : blackLimit);
       if (NULL_MOVE_NOTATION.equals(reply.move())) {
         return new Result(Outcome.FAILURE, moverName + " reported no move in a position the " +
                 "arbiter did not find terminal", moves);
@@ -571,11 +575,11 @@ public class SelfPlayMatch {
   private static void printHeader(final Settings settings, final List<BookLine> lines) {
     System.out.println("Engine A: " + settings.engineACommand());
     System.out.println("Engine B: " + settings.engineBCommand());
-    final String nodes = settings.nodeLimitA() == settings.nodeLimitB() ?
-            String.valueOf(settings.nodeLimitA()) :
-            settings.nodeLimitA() + " for " + ENGINE_A_NAME + " and " + settings.nodeLimitB() +
-                    " for " + ENGINE_B_NAME;
-    System.out.println("Nodes: " + nodes + " per move, hash " + settings.tableSizeMB() + " MB, " +
+    final String limit = settings.limitA().equals(settings.limitB()) ?
+            settings.limitA().description() :
+            settings.limitA().description() + " for " + ENGINE_A_NAME + " and " +
+                    settings.limitB().description() + " for " + ENGINE_B_NAME;
+    System.out.println("Limit: " + limit + " per move, hash " + settings.tableSizeMB() + " MB, " +
             SEARCH_THREADS + " search thread");
     if (!settings.useBook()) {
       System.out.println("Openings: the standard starting position");
@@ -806,6 +810,12 @@ public class SelfPlayMatch {
             "--nodes");
     System.out.println("  --nodes-b <count>    nodes per move for the second engine, overriding " +
             "--nodes");
+    System.out.println("  --movetime <ms>      milliseconds per move for both engines, in place " +
+            "of --nodes");
+    System.out.println("  --movetime-a <ms>    milliseconds per move for the first engine, " +
+            "overriding --movetime");
+    System.out.println("  --movetime-b <ms>    milliseconds per move for the second engine, " +
+            "overriding --movetime");
     System.out.println("  --hash <megabytes>   transposition table size, " + DEFAULT_TABLE_SIZE_MB +
             " by default");
     System.out.println("  --book <path>        the opening book, " + OpeningBook.DEFAULT_BOOK_PATH +
@@ -843,6 +853,12 @@ public class SelfPlayMatch {
     System.out.println("The sequential test is weighed at the end of a pair, so a match it stops");
     System.out.println("holds fewer pairs than --pairs asked for. The value of --pairs is the");
     System.out.println("budget the test is given rather than the number of pairs it will use.");
+    System.out.println();
+    System.out.println("A match is played under node limits or under move times, but not both. A");
+    System.out.println("move time is what an engine spends rather than what it searches, so a");
+    System.out.println("match under one is only as repeatable as the load on the machine is, and");
+    System.out.println("playing more pairs at once than the machine has cores leaves every engine");
+    System.out.println("searching less than its move time suggests.");
     System.out.println();
     System.out.println("A pair already being played when the match stops is played to the end and");
     System.out.println("counted, so a match on several workers may hold more pairs than the same");
@@ -1172,10 +1188,8 @@ public class SelfPlayMatch {
    *
    * @param engineACommand The command line starting the first engine.
    * @param engineBCommand The command line starting the second engine.
-   * @param nodeLimitA The largest number of nodes a search by the first engine may visit for one
-   *                   move.
-   * @param nodeLimitB The largest number of nodes a search by the second engine may visit for one
-   *                   move.
+   * @param limitA What stops a search by the first engine.
+   * @param limitB What stops a search by the second engine.
    * @param tableSizeMB The transposition table size in megabytes given to each engine.
    * @param bookPath The path of the opening book.
    * @param pairs The number of openings played, each of them played twice.
@@ -1196,19 +1210,21 @@ public class SelfPlayMatch {
    * @param logDirectory The directory the engine logs are written to.
    * @param verbose True to report every move and the moves of every game.
    */
-  public record Settings(String engineACommand, String engineBCommand, long nodeLimitA,
-                         long nodeLimitB, int tableSizeMB, String bookPath, int pairs, long seed,
-                         int openingIndex, boolean useBook, int plyCap, boolean adjudicate,
-                         int resignScore, int resignPlies, int drawScore, int drawPlies,
-                         int drawAfter, MatchStatistics.SequentialTest sequentialTest,
-                         int concurrency, long timeoutSeconds, String logDirectory,
-                         boolean verbose) {
+  public record Settings(String engineACommand, String engineBCommand, EngineProcess.Limit limitA,
+                         EngineProcess.Limit limitB, int tableSizeMB, String bookPath, int pairs,
+                         long seed, int openingIndex, boolean useBook, int plyCap,
+                         boolean adjudicate, int resignScore, int resignPlies, int drawScore,
+                         int drawPlies, int drawAfter,
+                         MatchStatistics.SequentialTest sequentialTest, int concurrency,
+                         long timeoutSeconds, String logDirectory, boolean verbose) {
 
     /**
      * Reads settings from command line arguments. The argument --nodes sets the node limit of both
      * engines, and --nodes-a and --nodes-b each set the limit of one engine and override --nodes
-     * whatever order they are given in. Adjudication is on unless --no-adjudication is given, and
-     * the sequential test is off unless --sprt is given.
+     * whatever order they are given in. The argument --movetime and its two counterparts state a
+     * move time the same way, in place of a node limit rather than alongside one. Adjudication is
+     * on unless --no-adjudication is given, and the sequential test is off unless --sprt is
+     * given.
      *
      * @param args The command line arguments, as described by the usage text.
      * @return The settings the arguments describe, or null if they asked for the usage text.
@@ -1219,8 +1235,11 @@ public class SelfPlayMatch {
      *                                  an adjudication value is out of range, if an adjudication
      *                                  value is given with --no-adjudication, if fewer than one
      *                                  pair is played at once, if a sequential
-     *                                  test value is given without --sprt, or if the sequential
-     *                                  test values do not state a test.
+     *                                  test value is given without --sprt, if the sequential
+     *                                  test values do not state a test, if node limits and move
+     *                                  times are given together, if a move time is given for one
+     *                                  engine alone, or if a move time is not shorter than the
+     *                                  timeout.
      */
     public static Settings read(final String[] args) {
       String engineACommand = null;
@@ -1228,6 +1247,11 @@ public class SelfPlayMatch {
       Long nodeLimitBoth = null;
       Long nodeLimitA = null;
       Long nodeLimitB = null;
+      String nodeArgument = null;
+      Long moveTimeBoth = null;
+      Long moveTimeA = null;
+      Long moveTimeB = null;
+      String moveTimeArgument = null;
       int tableSizeMB = DEFAULT_TABLE_SIZE_MB;
       String bookPath = OpeningBook.DEFAULT_BOOK_PATH;
       int pairs = DEFAULT_PAIRS;
@@ -1279,9 +1303,30 @@ public class SelfPlayMatch {
         switch (argument) {
           case "--engine-a" -> engineACommand = value;
           case "--engine-b" -> engineBCommand = value;
-          case "--nodes" -> nodeLimitBoth = number(value, argument);
-          case "--nodes-a" -> nodeLimitA = number(value, argument);
-          case "--nodes-b" -> nodeLimitB = number(value, argument);
+          case "--nodes" -> {
+            nodeLimitBoth = number(value, argument);
+            nodeArgument = argument;
+          }
+          case "--nodes-a" -> {
+            nodeLimitA = number(value, argument);
+            nodeArgument = argument;
+          }
+          case "--nodes-b" -> {
+            nodeLimitB = number(value, argument);
+            nodeArgument = argument;
+          }
+          case "--movetime" -> {
+            moveTimeBoth = number(value, argument);
+            moveTimeArgument = argument;
+          }
+          case "--movetime-a" -> {
+            moveTimeA = number(value, argument);
+            moveTimeArgument = argument;
+          }
+          case "--movetime-b" -> {
+            moveTimeB = number(value, argument);
+            moveTimeArgument = argument;
+          }
           case "--hash" -> tableSizeMB = (int) number(value, argument);
           case "--book" -> bookPath = value;
           case "--pairs" -> {
@@ -1372,12 +1417,36 @@ public class SelfPlayMatch {
         throw new IllegalArgumentException("The argument " + testArgument + " states the " +
                 "sequential test, so it cannot be given without --sprt");
       }
+      if (nodeArgument != null && moveTimeArgument != null) {
+        throw new IllegalArgumentException("The arguments " + nodeArgument + " and " +
+                moveTimeArgument + " measure effort differently, so they cannot be given " +
+                "together");
+      }
+      if (moveTimeArgument != null && moveTimeBoth == null &&
+              (moveTimeA == null || moveTimeB == null)) {
+        throw new IllegalArgumentException("The arguments --movetime-a and --movetime-b each set " +
+                "the move time of one engine, so either both of them or --movetime must be given");
+      }
       final MatchStatistics.SequentialTest sequentialTest = sprt ?
               new MatchStatistics.SequentialTest(nullElo, gainElo, falsePositiveRate,
                       falseNegativeRate) : null;
-      final long shared = nodeLimitBoth == null ? DEFAULT_NODE_LIMIT : nodeLimitBoth;
-      final long limitA = nodeLimitA == null ? shared : nodeLimitA;
-      final long limitB = nodeLimitB == null ? shared : nodeLimitB;
+      final EngineProcess.Limit limitA;
+      final EngineProcess.Limit limitB;
+      if (moveTimeArgument == null) {
+        final long shared = nodeLimitBoth == null ? DEFAULT_NODE_LIMIT : nodeLimitBoth;
+        limitA = EngineProcess.Limit.ofNodes(nodeLimitA == null ? shared : nodeLimitA);
+        limitB = EngineProcess.Limit.ofNodes(nodeLimitB == null ? shared : nodeLimitB);
+      } else {
+        limitA = EngineProcess.Limit.ofMoveTime(moveTimeA == null ? moveTimeBoth : moveTimeA);
+        limitB = EngineProcess.Limit.ofMoveTime(moveTimeB == null ? moveTimeBoth : moveTimeB);
+        if (Math.min(limitA.moveTimeMillis(), limitB.moveTimeMillis()) < 1) {
+          throw new IllegalArgumentException("A move time must be at least one millisecond");
+        }
+        if (Math.max(limitA.moveTimeMillis(), limitB.moveTimeMillis()) >= timeoutSeconds * 1000) {
+          throw new IllegalArgumentException("A move time must be shorter than the value of " +
+                  "--timeout, which is " + timeoutSeconds + " seconds");
+        }
+      }
       return new Settings(engineACommand, engineBCommand, limitA, limitB, tableSizeMB, bookPath,
               pairs, seed, openingIndex, useBook, plyCap, adjudicate, resignScore, resignPlies,
               drawScore, drawPlies, drawAfter, sequentialTest, concurrency, timeoutSeconds,
