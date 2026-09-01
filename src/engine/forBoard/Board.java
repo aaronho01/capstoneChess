@@ -29,8 +29,8 @@ import static engine.forBoard.Move.MoveFactory.getNullMove;
  */
 public final class Board {
 
-  /** A mutable map representing the configuration of pieces on the board, keyed by tile coordinate. */
-  private Map<Integer, Piece> boardConfig;
+  /** The pieces on the board, indexed by square, with a null entry for an empty square. */
+  private final Piece[] boardConfig;
 
   /** The white pieces currently on the board. Kept in sync with boardConfig by placePiece/removePiece. */
   private List<Piece> whitePieces;
@@ -148,7 +148,7 @@ public final class Board {
    * @param builder The builder object containing board configuration details.
    */
   private Board(final Builder builder) {
-    this.boardConfig = new HashMap<>(builder.BoardConfigurations);
+    this.boardConfig = builder.BoardConfigurations.clone();
     this.whitePieces = new ArrayList<>(calculateActivePieces(builder, Alliance.WHITE));
     this.blackPieces = new ArrayList<>(calculateActivePieces(builder, Alliance.BLACK));
     establishKings();
@@ -186,7 +186,7 @@ public final class Board {
    * @param source The board to copy.
    */
   private Board(final Board source) {
-    this.boardConfig = new HashMap<>(source.boardConfig);
+    this.boardConfig = source.boardConfig.clone();
     this.whitePieces = new ArrayList<>(source.whitePieces);
     this.blackPieces = new ArrayList<>(source.blackPieces);
     this.whiteKing = source.whiteKing;
@@ -220,7 +220,7 @@ public final class Board {
   public String toString() {
     final StringBuilder builder = new StringBuilder();
     for (int i = 0; i < BoardUtils.NUM_TILES; i++) {
-      builder.append(prettyPrint(this.boardConfig.get(i))).append(" ");
+      builder.append(prettyPrint(this.boardConfig[i])).append(" ");
       if ((i + 1) % 8 == 0) {
         builder.append("\n");
       }
@@ -378,10 +378,11 @@ public final class Board {
    * Retrieves the piece at the specified coordinate on the board.
    *
    * @param coordinate The coordinate to check (0-63).
-   * @return The piece at the specified coordinate, or null if the tile is empty.
+   * @return The piece at the specified coordinate, or null if the square is empty.
+   * @throws ArrayIndexOutOfBoundsException If the coordinate lies outside 0 to 63.
    */
   public Piece getPiece(final int coordinate) {
-    return this.boardConfig.get(coordinate);
+    return this.boardConfig[coordinate];
   }
 
   /**
@@ -629,7 +630,7 @@ public final class Board {
    * @param piece The piece to place, at the square given by its own position.
    */
   void placePiece(final Piece piece) {
-    this.boardConfig.put(piece.getPiecePosition(), piece);
+    this.boardConfig[piece.getPiecePosition()] = piece;
     final List<Piece> pieces = piece.getPieceAllegiance().isWhite() ? this.whitePieces : this.blackPieces;
     if (piece.getPieceType() == Piece.PieceType.KING) {
       recordKing((King) piece);
@@ -650,10 +651,11 @@ public final class Board {
    * @param coordinate The square to clear.
    */
   void removePiece(final int coordinate) {
-    final Piece piece = this.boardConfig.remove(coordinate);
+    final Piece piece = this.boardConfig[coordinate];
     if (piece == null) {
       return;
     }
+    this.boardConfig[coordinate] = null;
     final List<Piece> pieces = piece.getPieceAllegiance().isWhite() ? this.whitePieces : this.blackPieces;
     for (int index = 0; index < pieces.size(); index++) {
       if (pieces.get(index).getPiecePosition() == coordinate) {
@@ -780,8 +782,8 @@ public final class Board {
    * with no king on the board is left with a null king.
    */
   private void establishKings() {
-    for (final Piece piece : this.boardConfig.values()) {
-      if (piece.getPieceType() == Piece.PieceType.KING) {
+    for (final Piece piece : this.boardConfig) {
+      if (piece != null && piece.getPieceType() == Piece.PieceType.KING) {
         recordKing((King) piece);
       }
     }
@@ -805,16 +807,16 @@ public final class Board {
    *
    * @param builder  The builder containing the board configurations.
    * @param alliance The alliance (color) of the pieces to be considered.
-   * @return A collection of active pieces belonging to the specified alliance.
+   * @return A collection of active pieces belonging to the specified alliance, in ascending
+   *         square order.
    */
   private Collection<Piece> calculateActivePieces(Builder builder, Alliance alliance) {
     List<Piece> activePieces = new ArrayList<>();
-    for (Piece piece : builder.BoardConfigurations.values()) {
-      if (piece.getPieceAllegiance() == alliance) {
+    for (final Piece piece : builder.BoardConfigurations) {
+      if (piece != null && piece.getPieceAllegiance() == alliance) {
         activePieces.add(piece);
       }
     }
-    activePieces.sort(Comparator.comparingInt(Piece::getPiecePosition));
     return activePieces;
   }
 
@@ -823,8 +825,8 @@ public final class Board {
    * This class follows the Builder pattern to facilitate the creation of complex Board objects.
    */
   public static class Builder {
-    /** A map of board coordinates to pieces for the board being built. */
-    private final Map<Integer, Piece> BoardConfigurations;
+    /** The pieces for the board being built, indexed by square, null for an empty square. */
+    private final Piece[] BoardConfigurations;
     /** The player who will make the next move on the board being built. */
     private Alliance nextMoveMaker;
     /** The pawn that can be captured via en passant, if any. */
@@ -838,7 +840,7 @@ public final class Board {
 
     /*** Constructs a new Builder instance with empty configurations. */
     public Builder() {
-      this.BoardConfigurations = new HashMap<>(32, 1.0f);
+      this.BoardConfigurations = new Piece[BoardUtils.NUM_TILES];
       this.zobristHash = 0;
     }
 
@@ -849,7 +851,7 @@ public final class Board {
      * @return The current builder instance to continue configuring the board.
      */
     public Builder setPiece(final Piece piece) {
-      this.BoardConfigurations.put(piece.getPiecePosition(), piece);
+      this.BoardConfigurations[piece.getPiecePosition()] = piece;
       return this;
     }
 
