@@ -18,12 +18,6 @@ import java.util.List;
  * The class follows the singleton pattern to ensure consistent evaluation across the chess engine.
  * It uses simplified piece values optimized for exchange calculations and considers factors such as
  * piece defense and attack sequences to determine the material outcome of captures.
- * <p>
- * Both the attacker search and the defense test are answered through
- * {@link Piece#defendsSquare(int, Board)} rather than through generated move lists. Move generation
- * is pseudo-legal and never emits a move onto a square held by the moving piece's own alliance, so
- * a move list cannot report that a piece is defended, and disregarding occupancy is what an
- * exchange sequence requires.
  *
  * @author Aaron Ho
  */
@@ -88,65 +82,95 @@ public class StaticExchangeEvaluator {
       return capturedValue;
     }
 
-    final Alliance opponentSide = board.currentPlayer().getOpponent().getAlliance();
     final List<Piece> attackers = findAttackers(board, targetSquare);
+    removeAttackerAt(attackers, attackingPiece.getPiecePosition());
 
-    int gain = capturedValue;
+    return swapOffValue(capturedValue, attackerValue, attackers,
+            board.currentPlayer().getOpponent().getAlliance());
+  }
 
-    if (attackers.isEmpty()) {
-      return gain;
-    }
+  /**
+   * Computes the material a capture sequence leaves the side making the first capture with,
+   * from that side's perspective. Each side captures with its least valuable remaining attacker,
+   * and a side that would lose material by continuing the sequence stops instead.
+   *
+   * @param capturedValue The value of the piece taken by the first capture.
+   * @param attackerValue The value of the piece making the first capture.
+   * @param attackers The pieces of both alliances bearing on the square, excluding the piece
+   *                  making the first capture. This list is emptied as the sequence is walked.
+   * @param defendingSide The alliance that recaptures first.
+   * @return The material outcome of the sequence for the side making the first capture.
+   */
+  private int swapOffValue(final int capturedValue, final int attackerValue,
+                           final List<Piece> attackers, final Alliance defendingSide) {
+    final int[] gain = new int[attackers.size() + 2];
+    gain[0] = capturedValue;
 
-    List<Piece> remainingAttackers = new ArrayList<>(attackers);
-    remainingAttackers.removeIf(p -> p.equals(attackingPiece));
+    int depth = 0;
+    int movedValue = attackerValue;
+    Alliance side = defendingSide;
 
-    Alliance side = opponentSide;
-    int lastAttackerValue = attackerValue;
+    while (true) {
+      depth++;
+      gain[depth] = movedValue - gain[depth - 1];
 
-    while (!remainingAttackers.isEmpty()) {
-      Piece nextAttacker = findLeastValuableAttacker(remainingAttackers, side);
-
+      final Piece nextAttacker = findLeastValuableAttacker(attackers, side);
       if (nextAttacker == null) {
         break;
       }
 
-      gain = -gain + lastAttackerValue;
-
-      if (gain < 0) {
-        break;
-      }
-
-      lastAttackerValue = getPieceValue(nextAttacker.getPieceType());
-      remainingAttackers.remove(nextAttacker);
-      side = side.equals(Alliance.WHITE) ? Alliance.BLACK : Alliance.WHITE;
+      removeAttackerAt(attackers, nextAttacker.getPiecePosition());
+      movedValue = getPieceValue(nextAttacker.getPieceType());
+      side = side.isWhite() ? Alliance.BLACK : Alliance.WHITE;
     }
 
-    return gain;
+    while (depth > 1) {
+      depth--;
+      gain[depth - 1] = -Math.max(-gain[depth - 1], gain[depth]);
+    }
+
+    return gain[0];
   }
 
   /**
-   * Determines whether a piece is defended by any other piece of the same alliance. A defender is
-   * a friendly piece bearing on the piece's square, whether or not it could legally move there.
+   * Removes the attacker standing on the given square, if one is present.
+   *
+   * @param attackers The list to remove from.
+   * @param square The square whose occupant is removed.
+   */
+  private void removeAttackerAt(final List<Piece> attackers, final int square) {
+    for (int index = 0; index < attackers.size(); index++) {
+      if (attackers.get(index).getPiecePosition() == square) {
+        attackers.remove(index);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Determines whether a piece is defended by any other piece of the same alliance.
+   * This method provides an efficient check for piece defense without full attack calculation.
    *
    * @param piece The piece to check for defense.
    * @param board The current chess board state.
    * @return True if the piece is defended by a friendly piece, false otherwise.
    */
   public boolean isPieceDefended(final Piece piece, final Board board) {
-    if (piece == null) {
-      return false;
-    }
+    if (piece == null) return false;
 
     final int piecePosition = piece.getPiecePosition();
-    final Collection<Piece> friendlyPieces = piece.getPieceAllegiance().isWhite() ?
-            board.getWhitePieces() : board.getBlackPieces();
+    final Alliance pieceAlliance = piece.getPieceAllegiance();
 
-    for (final Piece otherPiece : friendlyPieces) {
-      if (otherPiece.getPiecePosition() == piecePosition) {
-        continue;
-      }
-      if (otherPiece.defendsSquare(piecePosition, board)) {
-        return true;
+    for (Piece otherPiece : board.getAllPieces()) {
+      if (otherPiece.getPieceAllegiance() == pieceAlliance &&
+              !otherPiece.equals(piece)) {
+
+        Collection<Move> moves = otherPiece.calculateLegalMoves(board);
+        for (Move move : moves) {
+          if (move.getDestinationCoordinate() == piecePosition) {
+            return true;
+          }
+        }
       }
     }
 
@@ -154,26 +178,24 @@ public class StaticExchangeEvaluator {
   }
 
   /**
-   * Finds every piece on the board that bears on a square, of either alliance. Occupancy of the
-   * square is disregarded, so the result holds both the pieces that could capture on the square
-   * and the pieces defending whatever stands there.
+   * Finds all pieces that can attack a specific square on the board.
+   * This method examines all pieces and their legal moves to determine attack capabilities.
    *
    * @param board The current chess board state.
    * @param targetSquare The square coordinate to check for attackers.
-   * @return A list of pieces that bear on the target square.
+   * @return A list of pieces that can attack the target square.
    */
   private List<Piece> findAttackers(final Board board, final int targetSquare) {
-    final List<Piece> attackers = new ArrayList<>();
+    List<Piece> attackers = new ArrayList<>();
 
-    for (final Piece piece : board.getWhitePieces()) {
-      if (piece.defendsSquare(targetSquare, board)) {
-        attackers.add(piece);
-      }
-    }
+    for (Piece piece : board.getAllPieces()) {
+      Collection<Move> moves = piece.calculateLegalMoves(board);
 
-    for (final Piece piece : board.getBlackPieces()) {
-      if (piece.defendsSquare(targetSquare, board)) {
-        attackers.add(piece);
+      for (Move move : moves) {
+        if (move.getDestinationCoordinate() == targetSquare) {
+          attackers.add(piece);
+          break;
+        }
       }
     }
 
