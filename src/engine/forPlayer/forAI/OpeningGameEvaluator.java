@@ -832,16 +832,10 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     double safetyScore = 0;
     final Collection<Piece> playerPieces = player.getActivePieces();
     final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
-    final Collection<Move> playerMoves = player.getLegalMoves();
 
     final int[] attackerCounts = new int[BoardUtils.NUM_TILES];
     for (final Move move : opponentMoves) {
       attackerCounts[move.getDestinationCoordinate()]++;
-    }
-
-    final int[] defenderCounts = new int[BoardUtils.NUM_TILES];
-    for (final Move move : playerMoves) {
-      defenderCounts[move.getDestinationCoordinate()]++;
     }
 
     for (final Piece piece : playerPieces) {
@@ -849,7 +843,8 @@ public class OpeningGameEvaluator implements BoardEvaluator {
 
       final int position = piece.getPiecePosition();
       final int attackerCount = attackerCounts[position];
-      final int defenderCount = defenderCounts[position];
+      final int[] defenderValues = sortedDefenderValues(playerPieces, position, board);
+      final int defenderCount = defenderValues.length;
 
       if (attackerCount > 0) {
         if (defenderCount == 0) {
@@ -861,7 +856,6 @@ public class OpeningGameEvaluator implements BoardEvaluator {
           }
         } else if (attackerCount > defenderCount) {
           final int[] attackerValues = sortedMovedPieceValues(opponentMoves, position, attackerCount);
-          final int[] defenderValues = sortedMovedPieceValues(playerMoves, position, defenderCount);
           int materialLoss = calculateSimpleExchange(piece, attackerValues, defenderValues);
           safetyScore -= materialLoss * 0.7;
         }
@@ -900,6 +894,34 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     Arrays.sort(values);
 
     return values;
+  }
+
+  /**
+   * Collects the values of the pieces in the given collection that defend the given square, in
+   * ascending order. The piece standing on the square is not included, and a piece whose line to
+   * the square is blocked by another piece is not included.
+   *
+   * @param playerPieces The pieces to test.
+   * @param square The square to test.
+   * @param board The current chess board state.
+   * @return The values of the defending pieces, in ascending order.
+   */
+  private int[] sortedDefenderValues(final Collection<Piece> playerPieces,
+                                     final int square,
+                                     final Board board) {
+    final int[] values = new int[playerPieces.size()];
+    int index = 0;
+
+    for (final Piece piece : playerPieces) {
+      if (piece.getPiecePosition() != square && piece.defendsSquare(square, board)) {
+        values[index++] = piece.getPieceValue();
+      }
+    }
+
+    final int[] defenderValues = Arrays.copyOf(values, index);
+    Arrays.sort(defenderValues);
+
+    return defenderValues;
   }
 
   /**
@@ -957,10 +979,10 @@ public class OpeningGameEvaluator implements BoardEvaluator {
    * @return True if the piece is defended by a friendly piece.
    */
   private boolean isPieceDefended(Piece piece, Player owner, Board board) {
-    int position = piece.getPiecePosition();
+    final int position = piece.getPiecePosition();
 
-    for (Move move : owner.getLegalMoves()) {
-      if (move.getDestinationCoordinate() == position) {
+    for (final Piece defender : owner.getActivePieces()) {
+      if (defender.getPiecePosition() != position && defender.defendsSquare(position, board)) {
         return true;
       }
     }

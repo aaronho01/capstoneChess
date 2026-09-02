@@ -1483,15 +1483,9 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
   private double pieceSafetyEvaluation(final Player player, final Board board) {
     double safetyScore = 0;
     final Collection<Piece> playerPieces = player.getActivePieces();
-    final Collection<Move> playerMoves = player.getLegalMoves();
     final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
 
-    int[] defenseCount = new int[BoardUtils.NUM_TILES];
     int[] attackCount = new int[BoardUtils.NUM_TILES];
-
-    for (final Move move : playerMoves) {
-      defenseCount[move.getDestinationCoordinate()]++;
-    }
 
     for (final Move move : opponentMoves) {
       attackCount[move.getDestinationCoordinate()]++;
@@ -1502,7 +1496,7 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
 
       final int position = piece.getPiecePosition();
       final int attacks = attackCount[position];
-      final int defenses = defenseCount[position];
+      final int defenses = countDefenders(playerPieces, position, board);
 
       if (attacks > 0) {
         if (defenses == 0) {
@@ -1519,6 +1513,30 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
     }
 
     return safetyScore;
+  }
+
+  /**
+   * Counts the pieces in the given collection that defend the given square. The piece standing on
+   * the square is not counted, and a piece whose line to the square is blocked by another piece
+   * does not count.
+   *
+   * @param playerPieces The pieces to test.
+   * @param square The square to test.
+   * @param board The current chess board state.
+   * @return The number of pieces in the collection that defend the square.
+   */
+  private static int countDefenders(final Collection<Piece> playerPieces,
+                                    final int square,
+                                    final Board board) {
+    int defenders = 0;
+
+    for (final Piece piece : playerPieces) {
+      if (piece.getPiecePosition() != square && piece.defendsSquare(square, board)) {
+        defenders++;
+      }
+    }
+
+    return defenders;
   }
 
   /**
