@@ -81,6 +81,10 @@ goto :done
 call :buildSuite "perft" "engine.forTesting.PerftSuite" "src\engine\forTesting\PerftSuite.java" || exit /b 1
 goto :done
 
+:tacticalTarget
+call :buildSuite "tactical" "engine.forTesting.TacticalSuite" "src\engine\forTesting\TacticalSuite.java" || exit /b 1
+goto :done
+
 :bookTarget
 call :buildSuite "book" "engine.forTesting.OpeningBook" "src\engine\forTesting\OpeningBook.java" || exit /b 1
 goto :done
