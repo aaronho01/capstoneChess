@@ -2,17 +2,20 @@
 setlocal enabledelayedexpansion
 
 rem Compiles the engine and packages the runnable jars. Run "build" for every target or
-rem "build <target>" for one of uci, gui, perft, tactical, book, all, or clean.
+rem "build <target>" for one of uci, gui, perft, tactical, book, match, compare, all, or clean.
 
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
 set "RELEASE=25"
 set "OUT=out"
+set "JAR_CACHE=jars"
+set "WORKTREE=%OUT%\compare-worktree"
 set "UCI_JAR=capstone-chess-uci.jar"
 set "GUI_JAR=CapstoneChess.jar"
 set "UCI_MAIN=engine.forUCI.UciEngine"
 set "GUI_MAIN=engine.engineDriver"
+set "MATCH_MAIN=engine.forTesting.SelfPlayMatch"
 set "ENGINE_LIBS=lib\guava-33.4.0-jre.jar lib\failureaccess-1.0.2.jar"
 set "CONT=  "
 
@@ -56,6 +59,7 @@ if /i "%TARGET%"=="perft" goto :perftTarget
 if /i "%TARGET%"=="tactical" goto :tacticalTarget
 if /i "%TARGET%"=="book" goto :bookTarget
 if /i "%TARGET%"=="match" goto :matchTarget
+if /i "%TARGET%"=="compare" goto :compareTarget
 if /i "%TARGET%"=="clean" goto :cleanTarget
 echo Unknown target: %TARGET%
 goto :usage
@@ -66,7 +70,7 @@ call :buildGui || exit /b 1
 call :buildSuite "perft" "engine.forTesting.PerftSuite" "src\engine\forTesting\PerftSuite.java" || exit /b 1
 call :buildSuite "tactical" "engine.forTesting.TacticalSuite" "src\engine\forTesting\TacticalSuite.java" || exit /b 1
 call :buildSuite "book" "engine.forTesting.OpeningBook" "src\engine\forTesting\OpeningBook.java" || exit /b 1
-call :buildSuite "match" "engine.forTesting.SelfPlayMatch" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
+call :buildSuite "match" "%MATCH_MAIN%" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
 goto :done
 
 :uciTarget
@@ -90,14 +94,14 @@ call :buildSuite "book" "engine.forTesting.OpeningBook" "src\engine\forTesting\O
 goto :done
 
 :matchTarget
-call :buildSuite "match" "engine.forTesting.SelfPlayMatch" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
+call :buildSuite "match" "%MATCH_MAIN%" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
 goto :done
 
 :cleanTarget
 if exist "%OUT%" rmdir /s /q "%OUT%"
 if exist "%UCI_JAR%" del /q "%UCI_JAR%"
 if exist "%GUI_JAR%" del /q "%GUI_JAR%"
-echo Removed the build output.
+echo Removed the build output. The jars in %JAR_CACHE% were left alone.
 goto :done
 
 :done
@@ -113,9 +117,136 @@ echo   perft      compile PerftSuite
 echo   tactical   compile TacticalSuite
 echo   book       compile OpeningBook
 echo   match      compile SelfPlayMatch
-echo   all        every target above, which is the default
-echo   clean      remove %OUT% and both jars
+echo   compare    play one revision against another, see "build compare" for its arguments
+echo   all        every target above except compare, which is the default
+echo   clean      remove %OUT% and both jars, leaving %JAR_CACHE%
 exit /b 1
+
+:compareUsage
+echo Usage: build compare ^<baseline-ref^> [test-ref] [match options]
+echo.
+echo A ref is anything git resolves to a commit, such as a hash, a tag, a branch, or
+echo HEAD~1. The baseline is engine A and the test revision is engine B. Leaving the
+echo test ref out plays the working tree as engine B, which is how an uncommitted
+echo change is measured. An argument beginning with two dashes ends the refs, so
+echo "build compare HEAD~1 --pairs 500" reads HEAD~1 as the baseline.
+echo.
+echo Every option after the refs is passed to %MATCH_MAIN% unchanged. Run that class
+echo with --help for the options it takes.
+echo.
+echo The jar built from a revision is kept in %JAR_CACHE% under its hash and reused
+echo the next time that revision is asked for. Delete the jar to force a rebuild.
+echo Only revisions holding the uci target can be built this way.
+exit /b 1
+
+:compareTarget
+shift
+set "BASE_REF=%~1"
+if not defined BASE_REF goto :compareUsage
+if "!BASE_REF:~0,2!"=="--" goto :compareUsage
+shift
+
+set "TEST_REF="
+if "%~1"=="" goto :compareCollect
+set "NEXT_ARG=%~1"
+if "!NEXT_ARG:~0,2!"=="--" goto :compareCollect
+set "TEST_REF=%~1"
+shift
+
+:compareCollect
+set "MATCH_ARGS="
+:compareCollectLoop
+if "%~1"=="" goto :compareStart
+set "MATCH_ARGS=!MATCH_ARGS! "%~1""
+shift
+goto :compareCollectLoop
+
+:compareStart
+where git >nul 2>&1
+if errorlevel 1 (
+    echo No git was found on the path. The compare target checks a revision out to build it.
+    exit /b 1
+)
+set "JAVA_LINE="
+for /f "delims=" %%V in ('java -version 2^>^&1') do (
+    if not defined JAVA_LINE set "JAVA_LINE=%%V"
+)
+if not defined JAVA_LINE (
+    echo No java was found on the path. The engine processes are started with "java".
+    exit /b 1
+)
+if not exist "%JAR_CACHE%" mkdir "%JAR_CACHE%"
+
+call :buildRevision "!BASE_REF!"
+if errorlevel 1 exit /b 1
+set "BASE_JAR=!REV_JAR!"
+set "BASE_LABEL=!REV_SHA:~0,12!"
+
+if not defined TEST_REF goto :compareWorkingTree
+call :buildRevision "!TEST_REF!"
+if errorlevel 1 exit /b 1
+set "TEST_JAR=!REV_JAR!"
+set "TEST_LABEL=!REV_SHA:~0,12!"
+goto :compareRun
+
+:compareWorkingTree
+call :buildUci || exit /b 1
+set "TEST_JAR=%UCI_JAR%"
+set "TEST_LABEL=working tree"
+
+:compareRun
+call :buildSuite "match" "%MATCH_MAIN%" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
+echo [compare] engine A is !BASE_LABEL!
+echo [compare] engine B is !TEST_LABEL!
+echo [compare] the engines run under !JAVA_LINE!
+java -cp "%OUT%\match;!ENGINE_CP!" %MATCH_MAIN% --engine-a "java -jar !BASE_JAR!" --engine-b "java -jar !TEST_JAR!" !MATCH_ARGS!
+if errorlevel 1 exit /b 1
+goto :done
+
+:buildRevision
+rem %1 is the revision to build. Sets REV_SHA to its hash and REV_JAR to the jar built from it.
+set "REV_SHA="
+for /f "delims=" %%S in ('git rev-list -n 1 "%~1" 2^>nul') do set "REV_SHA=%%S"
+if not defined REV_SHA (
+    echo Could not resolve %~1 to a commit.
+    exit /b 1
+)
+set "REV_JAR=%JAR_CACHE%\!REV_SHA!.jar"
+if exist "!REV_JAR!" (
+    echo [compare] reusing the jar built from !REV_SHA:~0,12!
+    exit /b 0
+)
+echo [compare] building !REV_SHA:~0,12!
+if not exist "%OUT%" mkdir "%OUT%"
+call :removeWorktree
+git worktree add --detach "%WORKTREE%" !REV_SHA!
+if errorlevel 1 (
+    echo Could not check !REV_SHA:~0,12! out into a worktree.
+    exit /b 1
+)
+pushd "%WORKTREE%" || exit /b 1
+call build.bat uci
+set "REV_STATUS=!errorlevel!"
+popd
+if not "!REV_STATUS!"=="0" (
+    call :removeWorktree
+    echo The uci target failed in !REV_SHA:~0,12!. A revision older than that target cannot be built this way.
+    exit /b 1
+)
+copy /y "%WORKTREE%\%UCI_JAR%" "!REV_JAR!" >nul
+if errorlevel 1 (
+    call :removeWorktree
+    echo Could not copy the jar out of the worktree.
+    exit /b 1
+)
+call :removeWorktree
+exit /b 0
+
+:removeWorktree
+git worktree remove --force "%WORKTREE%" >nul 2>&1
+if exist "%WORKTREE%" rmdir /s /q "%WORKTREE%"
+git worktree prune >nul 2>&1
+exit /b 0
 
 :compile
 rem %1 is the output subdirectory, %2 is the entry point source file.

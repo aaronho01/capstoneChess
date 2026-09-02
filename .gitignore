@@ -1,5 +1,6 @@
 .idea/
 *.iml
 out/
+jars/
 CapstoneChess.jar
 capstone-chess-uci.jar
