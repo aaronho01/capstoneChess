@@ -123,13 +123,17 @@ echo   clean      remove %OUT% and both jars, leaving %JAR_CACHE%
 exit /b 1
 
 :compareUsage
-echo Usage: build compare ^<baseline-ref^> [test-ref] [match options]
+echo Usage: build compare ^<first-ref^> [second-ref] [match options]
 echo.
 echo A ref is anything git resolves to a commit, such as a hash, a tag, a branch, or
-echo HEAD~1. The baseline is engine A and the test revision is engine B. Leaving the
-echo test ref out plays the working tree as engine B, which is how an uncommitted
-echo change is measured. An argument beginning with two dashes ends the refs, so
-echo "build compare HEAD~1 --pairs 500" reads HEAD~1 as the baseline.
+echo HEAD~1. The first ref is engine A and the second is engine B. The word working
+echo stands for the working tree and can be given in either position, so
+echo "build compare working HEAD~1" plays an uncommitted change as engine A. Leaving
+echo the second ref out plays the working tree as engine B. An argument beginning
+echo with two dashes ends the refs, so "build compare HEAD~1 --pairs 500" reads
+echo HEAD~1 as the first ref.
+echo.
+echo The figures and the sequential test are reported for engine A.
 echo.
 echo Every option after the refs is passed to %MATCH_MAIN% unchanged. Run that class
 echo with --help for the options it takes.
@@ -177,24 +181,17 @@ if not defined JAVA_LINE (
 )
 if not exist "%JAR_CACHE%" mkdir "%JAR_CACHE%"
 
-call :buildRevision "!BASE_REF!"
+call :buildSide "!BASE_REF!"
 if errorlevel 1 exit /b 1
-set "BASE_JAR=!REV_JAR!"
-set "BASE_LABEL=!REV_SHA:~0,12!"
+set "BASE_JAR=!SIDE_JAR!"
+set "BASE_LABEL=!SIDE_LABEL!"
 
-if not defined TEST_REF goto :compareWorkingTree
-call :buildRevision "!TEST_REF!"
+if not defined TEST_REF set "TEST_REF=working"
+call :buildSide "!TEST_REF!"
 if errorlevel 1 exit /b 1
-set "TEST_JAR=!REV_JAR!"
-set "TEST_LABEL=!REV_SHA:~0,12!"
-goto :compareRun
+set "TEST_JAR=!SIDE_JAR!"
+set "TEST_LABEL=!SIDE_LABEL!"
 
-:compareWorkingTree
-call :buildUci || exit /b 1
-set "TEST_JAR=%UCI_JAR%"
-set "TEST_LABEL=working tree"
-
-:compareRun
 call :buildSuite "match" "%MATCH_MAIN%" "src\engine\forTesting\SelfPlayMatch.java" || exit /b 1
 echo [compare] engine A is !BASE_LABEL!
 echo [compare] engine B is !TEST_LABEL!
@@ -202,6 +199,22 @@ echo [compare] the engines run under !JAVA_LINE!
 java -cp "%OUT%\match;!ENGINE_CP!" %MATCH_MAIN% --engine-a "java -jar !BASE_JAR!" --engine-b "java -jar !TEST_JAR!" !MATCH_ARGS!
 if errorlevel 1 exit /b 1
 goto :done
+
+:buildSide
+rem %1 is a revision or the word working. Sets SIDE_JAR to the jar the side plays and
+rem SIDE_LABEL to the name it is reported under.
+if /i "%~1"=="working" goto :buildSideWorkingTree
+call :buildRevision "%~1"
+if errorlevel 1 exit /b 1
+set "SIDE_JAR=!REV_JAR!"
+set "SIDE_LABEL=!REV_SHA:~0,12!"
+exit /b 0
+
+:buildSideWorkingTree
+call :buildUci || exit /b 1
+set "SIDE_JAR=%UCI_JAR%"
+set "SIDE_LABEL=working tree"
+exit /b 0
 
 :buildRevision
 rem %1 is the revision to build. Sets REV_SHA to its hash and REV_JAR to the jar built from it.
