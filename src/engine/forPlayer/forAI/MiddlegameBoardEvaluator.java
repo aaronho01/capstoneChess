@@ -994,7 +994,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
               (!rook.getPieceAllegiance().isWhite() && rookRank == 6)) {
         rookScore += 30;
 
-        final King opponentKing = board.currentPlayer().getOpponent().getPlayerKing();
+        final King opponentKing = opposingKing(board, rook.getPieceAllegiance());
         final int kingRank = opponentKing.getPiecePosition() / 8;
 
         if ((opponentKing.getPieceAllegiance().isWhite() && kingRank == 7) ||
@@ -1466,7 +1466,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
             }
           }
 
-          final King opponentKing = board.currentPlayer().getOpponent().getPlayerKing();
+          final King opponentKing = opposingKing(board, alliance);
           final int kingRank = opponentKing.getPiecePosition() / 8;
 
           if ((alliance.isWhite() && kingRank == 0) || (!alliance.isWhite() && kingRank == 7)) {
@@ -1595,7 +1595,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
           }
         }
 
-        final King opponentKing = board.currentPlayer().getOpponent().getPlayerKing();
+        final King opponentKing = opposingKing(board, alliance);
         final int kingPosition = opponentKing.getPiecePosition();
 
         final int distance = calculateChebyshevDistance(position, kingPosition);
@@ -1661,5 +1661,17 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     return player.getActivePieces().stream()
             .filter(piece -> piece.getPieceType() == Piece.PieceType.PAWN)
             .collect(Collectors.toList());
+  }
+
+  /**
+   * Retrieves the king of the alliance opposing the given one. The returned king is null if the
+   * opposing alliance has no king on the board.
+   *
+   * @param board The current chess board.
+   * @param alliance The alliance whose opposing king to retrieve.
+   * @return The king opposing the given alliance.
+   */
+  private static King opposingKing(final Board board, final Alliance alliance) {
+    return board.getKing(alliance.isWhite() ? Alliance.BLACK : Alliance.WHITE);
   }
 }
