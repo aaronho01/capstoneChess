@@ -18,6 +18,12 @@ import java.util.List;
  * The class follows the singleton pattern to ensure consistent evaluation across the chess engine.
  * It uses simplified piece values optimized for exchange calculations and considers factors such as
  * piece defense and attack sequences to determine the material outcome of captures.
+ * <p>
+ * Both the attacker search and the defense test are answered through
+ * {@link Piece#defendsSquare(int, Board)} rather than through generated move lists. Move generation
+ * is pseudo-legal and never emits a move onto a square held by the moving piece's own alliance, so
+ * a move list cannot report that a piece is defended, and disregarding occupancy is what an
+ * exchange sequence requires.
  *
  * @author Aaron Ho
  */
@@ -148,29 +154,28 @@ public class StaticExchangeEvaluator {
   }
 
   /**
-   * Determines whether a piece is defended by any other piece of the same alliance.
-   * This method provides an efficient check for piece defense without full attack calculation.
+   * Determines whether a piece is defended by any other piece of the same alliance. A defender is
+   * a friendly piece bearing on the piece's square, whether or not it could legally move there.
    *
    * @param piece The piece to check for defense.
    * @param board The current chess board state.
    * @return True if the piece is defended by a friendly piece, false otherwise.
    */
   public boolean isPieceDefended(final Piece piece, final Board board) {
-    if (piece == null) return false;
+    if (piece == null) {
+      return false;
+    }
 
     final int piecePosition = piece.getPiecePosition();
-    final Alliance pieceAlliance = piece.getPieceAllegiance();
+    final Collection<Piece> friendlyPieces = piece.getPieceAllegiance().isWhite() ?
+            board.getWhitePieces() : board.getBlackPieces();
 
-    for (Piece otherPiece : board.getAllPieces()) {
-      if (otherPiece.getPieceAllegiance() == pieceAlliance &&
-              !otherPiece.equals(piece)) {
-
-        Collection<Move> moves = otherPiece.calculateLegalMoves(board);
-        for (Move move : moves) {
-          if (move.getDestinationCoordinate() == piecePosition) {
-            return true;
-          }
-        }
+    for (final Piece otherPiece : friendlyPieces) {
+      if (otherPiece.getPiecePosition() == piecePosition) {
+        continue;
+      }
+      if (otherPiece.defendsSquare(piecePosition, board)) {
+        return true;
       }
     }
 
@@ -178,24 +183,26 @@ public class StaticExchangeEvaluator {
   }
 
   /**
-   * Finds all pieces that can attack a specific square on the board.
-   * This method examines all pieces and their legal moves to determine attack capabilities.
+   * Finds every piece on the board that bears on a square, of either alliance. Occupancy of the
+   * square is disregarded, so the result holds both the pieces that could capture on the square
+   * and the pieces defending whatever stands there.
    *
    * @param board The current chess board state.
    * @param targetSquare The square coordinate to check for attackers.
-   * @return A list of pieces that can attack the target square.
+   * @return A list of pieces that bear on the target square.
    */
   private List<Piece> findAttackers(final Board board, final int targetSquare) {
-    List<Piece> attackers = new ArrayList<>();
+    final List<Piece> attackers = new ArrayList<>();
 
-    for (Piece piece : board.getAllPieces()) {
-      Collection<Move> moves = piece.calculateLegalMoves(board);
+    for (final Piece piece : board.getWhitePieces()) {
+      if (piece.defendsSquare(targetSquare, board)) {
+        attackers.add(piece);
+      }
+    }
 
-      for (Move move : moves) {
-        if (move.getDestinationCoordinate() == targetSquare) {
-          attackers.add(piece);
-          break;
-        }
+    for (final Piece piece : board.getBlackPieces()) {
+      if (piece.defendsSquare(targetSquare, board)) {
+        attackers.add(piece);
       }
     }
 
