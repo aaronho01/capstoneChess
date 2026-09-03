@@ -217,12 +217,12 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     Collection<Piece> playerPieces = player.getActivePieces();
     Collection<Move> playerMoves = player.getLegalMoves();
 
-    final int[] centralSquares = {28, 29, 36, 37};
+    final int[] centralSquares = {27, 28, 35, 36};
     final int[] extendedCenterSquares = {
-            18, 19, 20, 21, 22, 23,
-            26, 27, 28, 29, 30, 31,
-            34, 35, 36, 37, 38, 39,
-            42, 43, 44, 45, 46, 47
+            18, 19, 20, 21,
+            26, 27, 28, 29,
+            34, 35, 36, 37,
+            42, 43, 44, 45
     };
 
     for (Piece piece : playerPieces) {
