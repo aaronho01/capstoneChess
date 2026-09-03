@@ -908,7 +908,6 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
 
     coordinationScore += evaluateBishopPair(playerPieces);
     coordinationScore += evaluateRookCoordination(playerPieces, board);
-    coordinationScore += evaluateKnightOutposts(playerPieces, getPlayerPawns(player), getPlayerPawns(player.getOpponent()));
     coordinationScore += evaluatePieceProtection(playerPieces, board, player.getOpponent());
     coordinationScore += evaluatePieceActivity(playerPieces);
 
@@ -947,7 +946,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates rook coordination, including connected rooks and rooks on the 7th rank.
+   * Evaluates rook coordination, including connected rooks and rooks on open and semi-open files.
    *
    * @param playerPieces The player's pieces.
    * @param board The current chess board.
@@ -984,23 +983,6 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
 
       if (rooksConnected) {
         rookScore += 10;
-      }
-    }
-
-    for (final Piece rook : rooks) {
-      final int rookRank = rook.getPiecePosition() / 8;
-
-      if ((rook.getPieceAllegiance().isWhite() && rookRank == 1) ||
-              (!rook.getPieceAllegiance().isWhite() && rookRank == 6)) {
-        rookScore += 30;
-
-        final King opponentKing = opposingKing(board, rook.getPieceAllegiance());
-        final int kingRank = opponentKing.getPiecePosition() / 8;
-
-        if ((opponentKing.getPieceAllegiance().isWhite() && kingRank == 7) ||
-                (!opponentKing.getPieceAllegiance().isWhite() && kingRank == 0)) {
-          rookScore += 15;
-        }
       }
     }
 
