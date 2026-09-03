@@ -442,8 +442,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     pawnStructureScore += evaluatePassedPawns(playerPawns, opponentPawns, player.getAlliance());
     pawnStructureScore += evaluatePawnIslands(playerPawns);
     pawnStructureScore += evaluateDoubledPawns(playerPawns);
-    pawnStructureScore += evaluateIsolatedPawns(playerPawns);
-    pawnStructureScore += evaluateBackwardPawns(playerPawns, player.getAlliance());
+    pawnStructureScore += evaluateIsolatedPawns(playerPawns, opponentPawns);
+    pawnStructureScore += evaluateBackwardPawns(playerPawns, opponentPawns, player.getAlliance());
     pawnStructureScore += evaluatePawnChains(playerPawns);
     pawnStructureScore += evaluateCentralPawnControl(playerPawns);
 
@@ -655,9 +655,11 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * Evaluates isolated pawns (pawns with no friendly pawns on adjacent files).
    *
    * @param playerPawns The player's pawns.
+   * @param opponentPawns The opponent's pawns.
    * @return The isolated pawns evaluation score.
    */
-  private double evaluateIsolatedPawns(final List<Piece> playerPawns) {
+  private double evaluateIsolatedPawns(final List<Piece> playerPawns,
+                                       final List<Piece> opponentPawns) {
     double isolatedPawnScore = 0;
 
     boolean[] filesWithPawns = new boolean[8];
@@ -676,7 +678,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       if (isIsolated) {
         isolatedPawnScore -= 15;
 
-        if (isOnSemiOpenFile(pawn, playerPawns)) {
+        if (isOnSemiOpenFile(pawn, opponentPawns)) {
           isolatedPawnScore -= 5;
         }
 
@@ -690,17 +692,17 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Checks if a pawn is on a semi-open file (no opponent pawn on the same file).
+   * Checks if a pawn is on a semi-open file, meaning no opponent pawn stands on that file.
    *
    * @param pawn The pawn to check.
-   * @param pawns The player's pawns.
+   * @param opponentPawns The opponent's pawns.
    * @return True if the pawn is on a semi-open file, false otherwise.
    */
-  private boolean isOnSemiOpenFile(final Piece pawn, final List<Piece> pawns) {
+  private boolean isOnSemiOpenFile(final Piece pawn, final List<Piece> opponentPawns) {
     final int pawnFile = pawn.getPiecePosition() % 8;
 
-    for (final Piece otherPawn : pawns) {
-      if (otherPawn != pawn && otherPawn.getPiecePosition() % 8 == pawnFile) {
+    for (final Piece opponentPawn : opponentPawns) {
+      if (opponentPawn.getPiecePosition() % 8 == pawnFile) {
         return false;
       }
     }
@@ -712,35 +714,37 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * Evaluates backward pawns (pawns that can't be protected by adjacent pawns).
    *
    * @param playerPawns The player's pawns.
+   * @param opponentPawns The opponent's pawns.
    * @param alliance The alliance of the player.
    * @return The backward pawns evaluation score.
    */
-  private double evaluateBackwardPawns(final List<Piece> playerPawns, final Alliance alliance) {
+  private double evaluateBackwardPawns(final List<Piece> playerPawns,
+                                       final List<Piece> opponentPawns,
+                                       final Alliance alliance) {
     double backwardPawnScore = 0;
 
-    int[] lowestRankOnFile = new int[8];
-    for (int i = 0; i < 8; i++) {
-      lowestRankOnFile[i] = alliance.isWhite() ? 7 : 0;
-    }
+    final int[] rearmostRankOnFile = new int[8];
+    final boolean[] fileHasPawn = new boolean[8];
 
     for (final Piece pawn : playerPawns) {
       final int file = pawn.getPiecePosition() % 8;
       final int rank = pawn.getPiecePosition() / 8;
 
-      if (alliance.isWhite()) {
-        lowestRankOnFile[file] = Math.min(lowestRankOnFile[file], rank);
+      if (!fileHasPawn[file]) {
+        fileHasPawn[file] = true;
+        rearmostRankOnFile[file] = rank;
+      } else if (alliance.isWhite()) {
+        rearmostRankOnFile[file] = Math.max(rearmostRankOnFile[file], rank);
       } else {
-        lowestRankOnFile[file] = Math.max(lowestRankOnFile[file], rank);
+        rearmostRankOnFile[file] = Math.min(rearmostRankOnFile[file], rank);
       }
     }
 
     for (final Piece pawn : playerPawns) {
-      boolean isBackward = isIsBackward(alliance, pawn, lowestRankOnFile);
-
-      if (isBackward) {
+      if (isBackward(alliance, pawn, rearmostRankOnFile, fileHasPawn)) {
         backwardPawnScore -= 20;
 
-        if (isOnSemiOpenFile(pawn, playerPawns)) {
+        if (isOnSemiOpenFile(pawn, opponentPawns)) {
           backwardPawnScore -= 5;
         }
       }
@@ -750,35 +754,40 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Determines if a pawn is backward based on the ranks of pawns on adjacent files.
+   * Determines if a pawn is backward, meaning it has at least one friendly pawn on an adjacent
+   * file and every such pawn is strictly more advanced than it is. Rank indices run from zero on
+   * black's back rank to seven on white's, so a smaller index is more advanced for white and a
+   * larger index is more advanced for black.
    *
    * @param alliance The alliance of the pawn.
    * @param pawn The pawn to check.
-   * @param lowestRankOnFile Array containing the lowest rank with a pawn on each file.
+   * @param rearmostRankOnFile The rank of the least advanced friendly pawn on each file.
+   * @param fileHasPawn Whether each file holds at least one friendly pawn.
    * @return True if the pawn is backward, false otherwise.
    */
-  private static boolean isIsBackward(Alliance alliance, Piece pawn, int[] lowestRankOnFile) {
+  private static boolean isBackward(final Alliance alliance,
+                                    final Piece pawn,
+                                    final int[] rearmostRankOnFile,
+                                    final boolean[] fileHasPawn) {
     final int file = pawn.getPiecePosition() % 8;
     final int rank = pawn.getPiecePosition() / 8;
 
-    boolean isBackward = false;
+    boolean hasAdjacentPawn = false;
 
-    if (file > 0) {
-      if (alliance.isWhite() && rank > lowestRankOnFile[file - 1]) {
-        isBackward = true;
-      } else if (!alliance.isWhite() && rank < lowestRankOnFile[file - 1]) {
-        isBackward = true;
+    for (int adjacentFile = file - 1; adjacentFile <= file + 1; adjacentFile += 2) {
+      if (adjacentFile < 0 || adjacentFile > 7 || !fileHasPawn[adjacentFile]) {
+        continue;
+      }
+
+      hasAdjacentPawn = true;
+      final int adjacentRank = rearmostRankOnFile[adjacentFile];
+
+      if (alliance.isWhite() ? adjacentRank >= rank : adjacentRank <= rank) {
+        return false;
       }
     }
 
-    if (file < 7) {
-      if (alliance.isWhite() && rank > lowestRankOnFile[file + 1]) {
-        isBackward = true;
-      } else if (!alliance.isWhite() && rank < lowestRankOnFile[file + 1]) {
-        isBackward = true;
-      }
-    }
-    return isBackward;
+    return hasAdjacentPawn;
   }
 
   /**
