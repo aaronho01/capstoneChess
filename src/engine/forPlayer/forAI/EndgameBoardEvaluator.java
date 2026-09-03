@@ -246,7 +246,8 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
 
   /**
    * Checks if the position has opposite-colored bishops, which often leads to
-   * drawish tendencies in the endgame.
+   * drawish tendencies in the endgame. The check requires each side to hold exactly one bishop,
+   * and reports false for any other bishop count.
    *
    * @param playerPieces The player's pieces.
    * @param opponentPieces The opponent's pieces.
@@ -254,31 +255,50 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
    */
   private boolean hasOppositeColoredBishops(final Collection<Piece> playerPieces,
                                             final Collection<Piece> opponentPieces) {
-    Bishop playerBishop = null;
-    Bishop opponentBishop = null;
+    final Bishop playerBishop = onlyBishop(playerPieces);
+    final Bishop opponentBishop = onlyBishop(opponentPieces);
 
-    for (final Piece piece : playerPieces) {
+    if (playerBishop == null || opponentBishop == null) {
+      return false;
+    }
+
+    final int playerSquareColor = squareColor(playerBishop.getPiecePosition());
+    final int opponentSquareColor = squareColor(opponentBishop.getPiecePosition());
+
+    return playerSquareColor != opponentSquareColor;
+  }
+
+  /**
+   * Returns the single bishop held by a side.
+   *
+   * @param pieces The pieces of one side.
+   * @return The only bishop among the pieces, or null when the side holds no bishop or more
+   *         than one.
+   */
+  private static Bishop onlyBishop(final Collection<Piece> pieces) {
+    Bishop found = null;
+
+    for (final Piece piece : pieces) {
       if (piece.getPieceType() == Piece.PieceType.BISHOP) {
-        playerBishop = (Bishop) piece;
-        break;
+        if (found != null) {
+          return null;
+        }
+
+        found = (Bishop) piece;
       }
     }
 
-    for (final Piece piece : opponentPieces) {
-      if (piece.getPieceType() == Piece.PieceType.BISHOP) {
-        opponentBishop = (Bishop) piece;
-        break;
-      }
-    }
+    return found;
+  }
 
-    if (playerBishop != null && opponentBishop != null) {
-      final int playerSquareColor = (playerBishop.getPiecePosition() / 8 + playerBishop.getPiecePosition() % 8) % 2;
-      final int opponentSquareColor = (opponentBishop.getPiecePosition() / 8 + opponentBishop.getPiecePosition() % 8) % 2;
-
-      return playerSquareColor != opponentSquareColor;
-    }
-
-    return false;
+  /**
+   * Returns the colour of a square as zero or one, where squares sharing a value share a colour.
+   *
+   * @param position The position of the square.
+   * @return The colour of the square.
+   */
+  private static int squareColor(final int position) {
+    return (position / 8 + position % 8) % 2;
   }
 
   /**
