@@ -265,25 +265,6 @@ public class OpeningGameEvaluator implements BoardEvaluator {
       score += controlledSquares[extendedSquare] * 5;
     }
 
-    int centerPawns = 0;
-    boolean hasDPawn = false;
-    boolean hasEPawn = false;
-
-    for (Piece piece : playerPieces) {
-      if (piece.getPieceType() == Piece.PieceType.PAWN) {
-        int file = piece.getPiecePosition() % 8;
-        if (file == 3 || file == 4) {
-          centerPawns++;
-          if (file == 3) hasDPawn = true;
-          if (file == 4) hasEPawn = true;
-        }
-      }
-    }
-
-    if (hasDPawn && hasEPawn) {
-      score += 50;
-    }
-
     return score;
   }
 
