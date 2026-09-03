@@ -95,7 +95,7 @@ public class OpeningGameEvaluator implements BoardEvaluator {
    * Evaluates piece development for the given player.
    * Scores each knight and bishop by whether it stands off its own back rank, penalises a queen
    * that has left its home square in proportion to the number of minor pieces still undeveloped,
-   * and scores castling status.
+   * and scores whether the king stands on a square castling can produce.
    *
    * @param player The player whose development is being evaluated.
    * @param board The current chess board state.
@@ -113,7 +113,7 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     int undevelopedMinorPieces = 0;
     boolean queenSortied = false;
     boolean queenPastMidline = false;
-    boolean castled = player.isCastled();
+    boolean castled = player.getPlayerKing().isOnCastledSquare();
 
     for (Piece piece : playerPieces) {
       final int pieceRank = piece.getPiecePosition() / 8;
@@ -289,7 +289,8 @@ public class OpeningGameEvaluator implements BoardEvaluator {
 
   /**
    * Evaluates king safety which is critical during the opening phase.
-   * Prioritizes castling and penalizes king exposure in the center.
+   * Rewards a king standing on a square castling can produce and penalizes king exposure in
+   * the center.
    *
    * @param player The player whose king safety is being evaluated.
    * @param board The current chess board state.
@@ -300,7 +301,7 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     final King playerKing = player.getPlayerKing();
     final int kingPosition = playerKing.getPiecePosition();
 
-    if (player.isCastled()) {
+    if (playerKing.isOnCastledSquare()) {
       score += 120;
       score += evaluatePawnShield(player, kingPosition);
     } else {
@@ -310,10 +311,6 @@ public class OpeningGameEvaluator implements BoardEvaluator {
       boolean inCenter = (file >= 2 && file <= 5);
       if (inCenter) {
         score -= 80;
-      }
-
-      if (!playerKing.isFirstMove()) {
-        score -= 70;
       }
     }
 
