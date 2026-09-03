@@ -444,7 +444,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     pawnStructureScore += evaluateDoubledPawns(playerPawns);
     pawnStructureScore += evaluateIsolatedPawns(playerPawns, opponentPawns);
     pawnStructureScore += evaluateBackwardPawns(playerPawns, opponentPawns, player.getAlliance());
-    pawnStructureScore += evaluatePawnChains(playerPawns);
+    pawnStructureScore += evaluatePawnChains(playerPawns, player.getAlliance());
     pawnStructureScore += evaluateCentralPawnControl(playerPawns);
 
     return pawnStructureScore;
@@ -794,9 +794,10 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * Evaluates pawn chains (connected pawns that protect each other).
    *
    * @param playerPawns The player's pawns.
+   * @param alliance The alliance of the pawns.
    * @return The pawn chains evaluation score.
    */
-  private double evaluatePawnChains(final List<Piece> playerPawns) {
+  private double evaluatePawnChains(final List<Piece> playerPawns, final Alliance alliance) {
     double pawnChainScore = 0;
 
     Map<Integer, Set<Integer>> pawnsByRank = new HashMap<>();
@@ -817,7 +818,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       final int rank = pawn.getPiecePosition() / 8;
       final int file = pawn.getPiecePosition() % 8;
 
-      if (isPawnProtectingFile(pawnsByRank, rank, file)) {
+      if (isPawnProtectingFile(pawnsByRank, rank, file, alliance)) {
         chainLinks++;
       }
     }
@@ -832,18 +833,24 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Checks if a pawn is protected by another pawn on an adjacent file.
+   * Checks if a pawn is protected by another pawn on an adjacent file. Rank indices run from zero
+   * on black's back rank to seven on white's, so a protecting pawn stands one index higher for
+   * white and one index lower for black.
    *
    * @param pawnsByRank Map of pawns organized by rank.
    * @param rank The rank of the pawn.
    * @param file The file of the pawn.
+   * @param alliance The alliance of the pawn.
    * @return True if the pawn is protected, false otherwise.
    */
   private boolean isPawnProtectingFile(final Map<Integer, Set<Integer>> pawnsByRank,
                                        final int rank,
-                                       final int file) {
-    if (pawnsByRank.containsKey(rank + 1)) {
-      final Set<Integer> filesWithPawns = pawnsByRank.get(rank + 1);
+                                       final int file,
+                                       final Alliance alliance) {
+    final int protectingRank = alliance.isWhite() ? rank + 1 : rank - 1;
+
+    if (pawnsByRank.containsKey(protectingRank)) {
+      final Set<Integer> filesWithPawns = pawnsByRank.get(protectingRank);
 
       return (file > 0 && filesWithPawns.contains(file - 1)) ||
               (file < 7 && filesWithPawns.contains(file + 1));
