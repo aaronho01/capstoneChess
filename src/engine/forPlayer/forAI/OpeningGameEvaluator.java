@@ -92,8 +92,10 @@ public class OpeningGameEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates piece development which is the most critical opening consideration.
-   * Heavily penalizes undeveloped minor pieces and rewards proper development order.
+   * Evaluates piece development for the given player.
+   * Scores each knight and bishop by whether it stands off its own back rank, penalises a queen
+   * that has left its home square in proportion to the number of minor pieces still undeveloped,
+   * and scores castling status.
    *
    * @param player The player whose development is being evaluated.
    * @param board The current chess board state.
@@ -105,8 +107,12 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     Alliance alliance = player.getAlliance();
     boolean isWhite = alliance.isWhite();
 
+    final int queenHomeSquare = isWhite ? 59 : 3;
+
     int developedMinorPieces = 0;
-    boolean queenMoved = false;
+    int undevelopedMinorPieces = 0;
+    boolean queenSortied = false;
+    boolean queenPastMidline = false;
     boolean castled = player.isCastled();
 
     for (Piece piece : playerPieces) {
@@ -117,15 +123,16 @@ public class OpeningGameEvaluator implements BoardEvaluator {
 
         boolean developedPosition = false;
         if ((isWhite && pieceRank != 7) || (!isWhite && pieceRank != 0)) {
-          score += 40;
+          score += 15;
           developedMinorPieces++;
           developedPosition = true;
 
           if (isCentralPosition(piece.getPiecePosition(), piece.getPieceType())) {
-            score += 20;
+            score += 8;
           }
         } else {
-          score -= 60;
+          score -= 20;
+          undevelopedMinorPieces++;
         }
 
         if (developedPosition) {
@@ -134,21 +141,22 @@ public class OpeningGameEvaluator implements BoardEvaluator {
         }
       }
 
-      if (piece.getPieceType() == Piece.PieceType.QUEEN && !piece.isFirstMove()) {
-        queenMoved = true;
-        int queenRank = piece.getPiecePosition() / 8;
-        int queenFile = piece.getPiecePosition() % 8;
-        score -= 200;
+      if (piece.getPieceType() == Piece.PieceType.QUEEN &&
+              piece.getPiecePosition() != queenHomeSquare) {
+        queenSortied = true;
 
+        final int queenRank = piece.getPiecePosition() / 8;
         if ((isWhite && queenRank < 4) || (!isWhite && queenRank > 3)) {
-          score -= 150;
+          queenPastMidline = true;
         }
+      }
+    }
 
-        if (queenFile >= 2 && queenFile <= 5) {
-          score -= 100;
-        } else {
-          score -= 80;
-        }
+    if (queenSortied) {
+      score -= undevelopedMinorPieces * 20;
+
+      if (queenPastMidline) {
+        score -= undevelopedMinorPieces * 15;
       }
     }
 
@@ -160,8 +168,8 @@ public class OpeningGameEvaluator implements BoardEvaluator {
       score -= 60;
     }
 
-    if (developedMinorPieces >= 3 && castled && !queenMoved) {
-      score += 50;
+    if (developedMinorPieces >= 3 && castled && !queenSortied) {
+      score += 20;
     }
 
     return score;
@@ -632,8 +640,9 @@ public class OpeningGameEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates piece mobility with reduced weight compared to other opening factors.
-   * Considers general mobility and specific mobility for knights and bishops.
+   * Evaluates piece mobility for the given player.
+   * Counts the player's legal moves and adds a further weighting for the moves available to each
+   * knight and bishop.
    *
    * @param player The player whose mobility is being evaluated.
    * @param board The current chess board state.
@@ -642,22 +651,18 @@ public class OpeningGameEvaluator implements BoardEvaluator {
   private double mobilityScore(final Player player, final Board board) {
     double score = 0;
     Collection<Move> playerMoves = player.getLegalMoves();
-    Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
 
-    score += playerMoves.size() * 1.5;
+    score += playerMoves.size();
 
     for (Piece piece : player.getActivePieces()) {
       if (piece.getPieceType() == Piece.PieceType.KNIGHT) {
         Collection<Move> knightMoves = piece.calculateLegalMoves(board);
-        score += knightMoves.size() * 3;
+        score += knightMoves.size() * 1.5;
       } else if (piece.getPieceType() == Piece.PieceType.BISHOP) {
         Collection<Move> bishopMoves = piece.calculateLegalMoves(board);
-        score += bishopMoves.size() * 2.5;
+        score += bishopMoves.size() * 1.5;
       }
     }
-
-    int mobilityDifference = playerMoves.size() - opponentMoves.size();
-    score += mobilityDifference * 2;
 
     return score;
   }
