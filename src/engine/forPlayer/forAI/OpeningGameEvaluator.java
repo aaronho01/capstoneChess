@@ -121,11 +121,9 @@ public class OpeningGameEvaluator implements BoardEvaluator {
       if (piece.getPieceType() == Piece.PieceType.KNIGHT ||
               piece.getPieceType() == Piece.PieceType.BISHOP) {
 
-        boolean developedPosition = false;
         if ((isWhite && pieceRank != 7) || (!isWhite && pieceRank != 0)) {
           score += 15;
           developedMinorPieces++;
-          developedPosition = true;
 
           if (isCentralPosition(piece.getPiecePosition(), piece.getPieceType())) {
             score += 8;
@@ -133,11 +131,6 @@ public class OpeningGameEvaluator implements BoardEvaluator {
         } else {
           score -= 20;
           undevelopedMinorPieces++;
-        }
-
-        if (developedPosition) {
-          Collection<Move> pieceMoves = piece.calculateLegalMoves(board);
-          score += pieceMoves.size() * 2;
         }
       }
 
