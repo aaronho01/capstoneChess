@@ -156,7 +156,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     final King playerKing = player.getPlayerKing();
     final int kingPosition = playerKing.getPiecePosition();
 
-    if (playerKing.isCastled()) {
+    if (playerKing.isOnCastledSquare()) {
       kingSafetyScore += 40;
     }
 
@@ -1364,14 +1364,14 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       if (knightAttacking) attackScore += 15;
       if (pawnAttacking) attackScore += 10;
 
-      final boolean opponentKingCastled = opponentKing.isCastled();
+      final boolean opponentKingOnCastledSquare = opponentKing.isOnCastledSquare();
       final boolean opponentChecked = player.getOpponent().isInCheck();
 
       if (opponentChecked) {
         attackScore += 50;
       }
 
-      if (!opponentKingCastled) {
+      if (!opponentKingOnCastledSquare) {
         attackScore += 30;
       }
 

@@ -118,6 +118,23 @@ public final class King extends Piece {
   }
 
   /**
+   * Returns whether this king stands on a square that castling can produce for its alliance,
+   * meaning the b, c, g, or h file of its own back rank. This is derived from the king's square
+   * alone and does not depend on how the king reached it, so unlike {@link #isCastled()} it is
+   * covered by the board's Zobrist hash.
+   *
+   * @return True if the king stands on a castled square, false otherwise.
+   */
+  public boolean isOnCastledSquare() {
+    final int homeRank = this.pieceAlliance.isWhite() ? 7 : 0;
+    if (this.piecePosition / 8 != homeRank) {
+      return false;
+    }
+    final int file = this.piecePosition % 8;
+    return file == 1 || file == 2 || file == 6 || file == 7;
+  }
+
+  /**
    * Returns whether this king retains the right to castle kingside.
    *
    * @return True if kingside castling is possible, false otherwise.
