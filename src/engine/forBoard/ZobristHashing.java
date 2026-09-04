@@ -122,12 +122,24 @@ public class ZobristHashing {
     return hash;
   }
 
+  /**
+   * Determines whether the given side still holds the given castling right, which is the case when
+   * its king has not moved and the rook standing on the corresponding corner square is that side's
+   * own rook and has not moved. The corner squares are 63 for white king side, 56 for white queen
+   * side, 7 for black king side, and 0 for black queen side. This reports only the persistent
+   * right, not whether a castling move is legal from the current position.
+   *
+   * @param board The current chess board.
+   * @param isWhite True to test white's right, false to test black's.
+   * @param kingSide True to test the king side right, false to test the queen side right.
+   * @return True if the right is still held, false otherwise.
+   */
   public static boolean canCastle(final Board board, final boolean isWhite, final boolean kingSide) {
     final King king = isWhite ? board.whitePlayer().getPlayerKing() : board.blackPlayer().getPlayerKing();
     if (!king.isFirstMove()) {
       return false;
     }
-    final int rookPosition = isWhite ? (kingSide ? 7 : 0) : (kingSide ? 63 : 56);
+    final int rookPosition = isWhite ? (kingSide ? 63 : 56) : (kingSide ? 7 : 0);
     final Piece rook = board.getPiece(rookPosition);
     return rook != null && rook.getPieceType() == Piece.PieceType.ROOK &&
             rook.getPieceAllegiance() == king.getPieceAllegiance() && rook.isFirstMove();

@@ -255,15 +255,15 @@ public abstract class Move {
     } else if (movedPiece.getPieceType() == Piece.PieceType.ROOK) {
       final boolean isWhite = movedPiece.getPieceAllegiance().isWhite();
       if (isWhite) {
-        if (fromPosition == 0 && ZobristHashing.canCastle(board, true, false)) {
+        if (fromPosition == 56 && ZobristHashing.canCastle(board, true, false)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 1);
-        } else if (fromPosition == 7 && ZobristHashing.canCastle(board, true, true)) {
+        } else if (fromPosition == 63 && ZobristHashing.canCastle(board, true, true)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 0);
         }
       } else {
-        if (fromPosition == 56 && ZobristHashing.canCastle(board, false, false)) {
+        if (fromPosition == 0 && ZobristHashing.canCastle(board, false, false)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 3);
-        } else if (fromPosition == 63 && ZobristHashing.canCastle(board, false, true)) {
+        } else if (fromPosition == 7 && ZobristHashing.canCastle(board, false, true)) {
           hash = ZobristHashing.updateHashCastlingRight(hash, 2);
         }
       }
@@ -454,15 +454,15 @@ public abstract class Move {
         final int rookPosition = this.attackedPiece.getPiecePosition();
 
         if (isWhiteRook) {
-          if (rookPosition == 0 && ZobristHashing.canCastle(this.board, true, false)) {
+          if (rookPosition == 56 && ZobristHashing.canCastle(this.board, true, false)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 1);
-          } else if (rookPosition == 7 && ZobristHashing.canCastle(this.board, true, true)) {
+          } else if (rookPosition == 63 && ZobristHashing.canCastle(this.board, true, true)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 0);
           }
         } else {
-          if (rookPosition == 56 && ZobristHashing.canCastle(this.board, false, false)) {
+          if (rookPosition == 0 && ZobristHashing.canCastle(this.board, false, false)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 3);
-          } else if (rookPosition == 63 && ZobristHashing.canCastle(this.board, false, true)) {
+          } else if (rookPosition == 7 && ZobristHashing.canCastle(this.board, false, true)) {
             hash = ZobristHashing.updateHashCastlingRight(hash, 2);
           }
         }
