@@ -695,11 +695,11 @@ public class OpeningGameEvaluator implements BoardEvaluator {
         int position = piece.getPiecePosition();
 
         if (alliance.isWhite()) {
-          if (position == 16) queensideFianchetto = true;
-          if (position == 23) kingsideFianchetto = true;
+          if (position == 49) queensideFianchetto = true;
+          if (position == 54) kingsideFianchetto = true;
         } else {
-          if (position == 40) queensideFianchetto = true;
-          if (position == 47) kingsideFianchetto = true;
+          if (position == 9) queensideFianchetto = true;
+          if (position == 14) kingsideFianchetto = true;
         }
       }
     }

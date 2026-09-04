@@ -1478,7 +1478,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates fianchettoed bishops (bishops in the corner of a pawn structure).
+   * Evaluates bishops standing on the fianchetto squares b2 and g2 for white, or b7 and g7 for
+   * black. The supporting pawn structure is not inspected.
    *
    * @param playerPieces The player's pieces.
    * @param alliance The alliance of the player.
@@ -1487,8 +1488,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   private double evaluateFianchetto(final Collection<Piece> playerPieces, final Alliance alliance) {
     double fianchettoScore = 0;
 
-    final int kingsideBishopPosition = alliance.isWhite() ? 62 : 6;
-    final int queensideBishopPosition = alliance.isWhite() ? 57 : 1;
+    final int kingsideBishopPosition = alliance.isWhite() ? 54 : 14;
+    final int queensideBishopPosition = alliance.isWhite() ? 49 : 9;
 
     for (final Piece piece : playerPieces) {
       if (piece.getPieceType() == Piece.PieceType.BISHOP) {
