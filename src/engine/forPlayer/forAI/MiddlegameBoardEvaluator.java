@@ -1241,7 +1241,11 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates space control - territory and mobility advantages.
+   * Evaluates space control for the given player.
+   * Scores the player's moves into the enemy half and into the extended center, the player's
+   * control of the four central squares, and the player's clamped legal move advantage over the
+   * opponent. Every term but the clamped move advantage is a per-player quantity and the caller
+   * forms the difference between the two players.
    *
    * @param player The player whose space control is being evaluated.
    * @return The space control evaluation score.
@@ -1271,22 +1275,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       }
     }
 
-    int opponentSpaceControl = 0;
-    for (final Move move : opponentMoves) {
-      final int destination = move.getDestinationCoordinate();
-      final int rank = destination / 8;
-      final int file = destination % 8;
-
-      if ((alliance.isWhite() && rank > 3) || (!alliance.isWhite() && rank < 4)) {
-        opponentSpaceControl++;
-      }
-
-      if (file >= 2 && file <= 5 && rank >= 2 && rank <= 5) {
-        opponentSpaceControl++;
-      }
-    }
-
-    spaceScore += (spacePiecesControl - opponentSpaceControl) * 0.5;
+    spaceScore += spacePiecesControl * 1.0;
     spaceScore += Math.min(playerMoves.size() - opponentMoves.size(), 10) * 3;
 
     final int[] keySquares = {27, 28, 35, 36};
