@@ -1210,8 +1210,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       final int file = position % 8;
       final int rank = position / 8;
 
-      int fileDistance = Math.min(file, 7 - file);
-      int rankDistance = Math.min(rank, 7 - rank);
+      int fileDistance = Math.min(Math.abs(file - 3), Math.abs(file - 4));
+      int rankDistance = Math.min(Math.abs(rank - 3), Math.abs(rank - 4));
       int distanceFromCenter = fileDistance + rankDistance;
 
       switch (piece.getPieceType()) {
