@@ -1494,8 +1494,10 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates mobility, which is less important in many endgames but still
-   * relevant for certain positions, particularly with active pieces.
+   * Evaluates mobility for the given player.
+   * Counts the player's legal moves, halving the weight in a pawn endgame and raising it when
+   * the two sides hold opposite colored bishops. The result is a per-player quantity and the
+   * caller forms the difference between the two players.
    *
    * @param player The player whose mobility is being evaluated.
    * @param board The current chess board state.
@@ -1504,7 +1506,6 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
   private double mobilityEvaluation(final Player player, final Board board) {
     double mobilityScore = 0;
     final Collection<Move> playerMoves = player.getLegalMoves();
-    final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
 
     double mobilityWeight = 1.0;
 
@@ -1516,8 +1517,7 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
       mobilityWeight = 1.5;
     }
 
-    int mobilityDifference = playerMoves.size() - opponentMoves.size();
-    mobilityScore += mobilityDifference * 2 * mobilityWeight;
+    mobilityScore += playerMoves.size() * 4 * mobilityWeight;
 
     return mobilityScore;
   }
