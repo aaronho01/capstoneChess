@@ -103,15 +103,16 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates piece mobility, a critical factor in middlegame evaluation.
-   * Mobility represents how many squares pieces can move to or attack.
+   * Evaluates piece mobility for the given player.
+   * Counts the player's legal moves and adds a further weighting for the moves available to each
+   * knight, bishop, rook and queen. The result is a per-player quantity and the caller forms the
+   * difference between the two players.
    *
    * @param player The player whose mobility is being evaluated.
    * @return The mobility evaluation score.
    */
   private double mobilityEvaluation(final Player player) {
     final Collection<Move> playerMoves = player.getLegalMoves();
-    final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
     double mobilityScore = 0;
 
     Map<Piece.PieceType, Integer> movesPerPiece = new HashMap<>();
@@ -136,8 +137,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       mobilityScore += movesPerPiece.get(Piece.PieceType.QUEEN) * 2.0;
     }
 
-    double relativeMobility = playerMoves.size() - opponentMoves.size();
-    mobilityScore += relativeMobility * 2.5;
+    mobilityScore += playerMoves.size() * 5.0;
 
     return mobilityScore;
   }
