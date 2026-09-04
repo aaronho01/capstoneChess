@@ -64,6 +64,7 @@ public class OpeningGameEvaluator implements BoardEvaluator {
    */
   @VisibleForTesting
   private double score(final Player player, final Board board, final int depth) {
+    final int[] defenderCounts = defenderCountsBySquare(player.getActivePieces(), board);
 
     return materialScore(player.getActivePieces()) +
             developmentScore(player, board) +
@@ -71,9 +72,36 @@ public class OpeningGameEvaluator implements BoardEvaluator {
             kingSafetyScore(player, board) +
             pawnStructureScore(player, board) +
             mobilityScore(player, board) +
-            pieceCoordinationScore(player, board) +
+            pieceCoordinationScore(player, board, defenderCounts) +
             tempoScore(player, board, depth) +
-            pieceSafetyScore(player, board);
+            pieceSafetyScore(player, board, defenderCounts);
+  }
+
+  /**
+   * Counts, for each square occupied by one of the given pieces, the number of other pieces in the
+   * collection that defend that square. The piece standing on the square is not counted, and a
+   * piece whose line to the square is blocked by another piece is not counted. Squares occupied by
+   * a king and squares occupied by no piece in the collection hold zero.
+   *
+   * @param playerPieces The pieces to test.
+   * @param board The current chess board state.
+   * @return A defender count for every square, indexed by board coordinate.
+   */
+  private int[] defenderCountsBySquare(final Collection<Piece> playerPieces, final Board board) {
+    final int[] defenderCounts = new int[BoardUtils.NUM_TILES];
+
+    for (final Piece occupant : playerPieces) {
+      if (occupant.getPieceType() == Piece.PieceType.KING) continue;
+
+      final int square = occupant.getPiecePosition();
+      for (final Piece defender : playerPieces) {
+        if (defender.getPiecePosition() != square && defender.defendsSquare(square, board)) {
+          defenderCounts[square]++;
+        }
+      }
+    }
+
+    return defenderCounts;
   }
 
   /**
@@ -623,32 +651,30 @@ public class OpeningGameEvaluator implements BoardEvaluator {
 
   /**
    * Evaluates piece coordination and harmony in opening positions.
-   * Rewards pieces that protect each other and follow good development patterns.
+   * Scores each defended queen, rook, bishop and knight in proportion to the number of pieces
+   * defending it, up to a per-piece-type cap, and adds a fixed bonus for a defended bishop or
+   * knight. Kings and pawns are not scored. Also scores the player's development patterns.
    *
    * @param player The player whose piece coordination is being evaluated.
    * @param board The current chess board state.
+   * @param defenderCounts The per-square defender counts for the player's pieces.
    * @return The piece coordination evaluation score.
    */
-  private double pieceCoordinationScore(final Player player, final Board board) {
+  private double pieceCoordinationScore(final Player player,
+                                        final Board board,
+                                        final int[] defenderCounts) {
     double score = 0;
-    Collection<Piece> playerPieces = player.getActivePieces();
-    Collection<Move> playerMoves = player.getLegalMoves();
+    final Collection<Piece> playerPieces = player.getActivePieces();
 
-    int[] protectedSquares = new int[BoardUtils.NUM_TILES];
+    for (final Piece piece : playerPieces) {
+      final int defenderCount = defenderCounts[piece.getPiecePosition()];
+      if (defenderCount == 0) continue;
 
-    for (Move move : playerMoves) {
-      protectedSquares[move.getDestinationCoordinate()]++;
-    }
-
-    for (Piece piece : playerPieces) {
-      int position = piece.getPiecePosition();
-      if (protectedSquares[position] > 0) {
-        score += 10;
-
-        if (piece.getPieceType() == Piece.PieceType.KNIGHT ||
-                piece.getPieceType() == Piece.PieceType.BISHOP) {
-          score += 15;
-        }
+      switch (piece.getPieceType()) {
+        case QUEEN -> score += Math.min(defenderCount * 15, 45);
+        case ROOK -> score += Math.min(defenderCount * 10, 30);
+        case BISHOP, KNIGHT -> score += 15 + Math.min(defenderCount * 5, 15);
+        default -> { }
       }
     }
 
@@ -779,15 +805,19 @@ public class OpeningGameEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates piece safety by detecting hanging pieces and undefended valuable pieces.
-   * Heavily penalizes pieces that can be captured for free or are inadequately defended.
-   * This is crucial in the opening to prevent tactical blunders.
+   * Evaluates piece safety by detecting hanging pieces and losing exchanges.
+   * Heavily penalizes an attacked piece with no defender, and penalizes an attacked piece by the
+   * estimated material loss when it is attacked more times than it is defended. The king is not
+   * scored.
    *
    * @param player The player whose piece safety is being evaluated.
    * @param board The current chess board state.
+   * @param defenderCounts The per-square defender counts for the player's pieces.
    * @return The piece safety evaluation score (negative values indicate unsafe pieces).
    */
-  private double pieceSafetyScore(final Player player, final Board board) {
+  private double pieceSafetyScore(final Player player,
+                                  final Board board,
+                                  final int[] defenderCounts) {
     double safetyScore = 0;
     final Collection<Piece> playerPieces = player.getActivePieces();
     final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
@@ -802,30 +832,22 @@ public class OpeningGameEvaluator implements BoardEvaluator {
 
       final int position = piece.getPiecePosition();
       final int attackerCount = attackerCounts[position];
-      final int[] defenderValues = sortedDefenderValues(playerPieces, position, board);
-      final int defenderCount = defenderValues.length;
+      if (attackerCount == 0) continue;
 
-      if (attackerCount > 0) {
-        if (defenderCount == 0) {
-          switch (piece.getPieceType()) {
-            case QUEEN -> safetyScore -= 800;
-            case ROOK -> safetyScore -= 450;
-            case BISHOP, KNIGHT -> safetyScore -= 280;
-            case PAWN -> safetyScore -= 90;
-          }
-        } else if (attackerCount > defenderCount) {
-          final int[] attackerValues = sortedMovedPieceValues(opponentMoves, position, attackerCount);
-          int materialLoss = calculateSimpleExchange(piece, attackerValues, defenderValues);
-          safetyScore -= materialLoss * 0.7;
-        }
-      }
+      final int defenderCount = defenderCounts[position];
 
-      if (defenderCount > 0) {
+      if (defenderCount == 0) {
         switch (piece.getPieceType()) {
-          case QUEEN -> safetyScore += Math.min(defenderCount * 15, 45);
-          case ROOK -> safetyScore += Math.min(defenderCount * 10, 30);
-          case BISHOP, KNIGHT -> safetyScore += Math.min(defenderCount * 5, 15);
+          case QUEEN -> safetyScore -= 800;
+          case ROOK -> safetyScore -= 450;
+          case BISHOP, KNIGHT -> safetyScore -= 280;
+          case PAWN -> safetyScore -= 90;
         }
+      } else if (attackerCount > defenderCount) {
+        final int[] attackerValues = sortedMovedPieceValues(opponentMoves, position, attackerCount);
+        final int[] defenderValues = sortedDefenderValues(playerPieces, position, board);
+        int materialLoss = calculateSimpleExchange(piece, attackerValues, defenderValues);
+        safetyScore -= materialLoss * 0.7;
       }
     }
 
