@@ -69,7 +69,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     return materialEvaluation(player.getActivePieces()) +
             mobilityEvaluation(player) +
             kingSafetyEvaluation(player, board) +
-            pawnStructureEvaluation(player) +
+            pawnStructureEvaluation(player, board) +
             pieceCoordinationEvaluation(player, board) +
             spaceControlEvaluation(player) +
             attackingPotentialEvaluation(player) +
@@ -431,14 +431,17 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * doubled pawns, pawn chains, and pawn islands.
    *
    * @param player The player whose pawn structure is being evaluated.
+   * @param board The current state of the chess board.
    * @return The pawn structure evaluation score.
    */
-  private double pawnStructureEvaluation(final Player player) {
+  private double pawnStructureEvaluation(final Player player, final Board board) {
+    final Player opponent = player.getOpponent();
     final List<Piece> playerPawns = getPlayerPawns(player);
-    final List<Piece> opponentPawns = getPlayerPawns(player.getOpponent());
+    final List<Piece> opponentPawns = getPlayerPawns(opponent);
     double pawnStructureScore = 0;
 
-    pawnStructureScore += evaluatePassedPawns(playerPawns, opponentPawns, player.getAlliance());
+    pawnStructureScore += evaluatePassedPawns(playerPawns, opponentPawns,
+            opponent.getActivePieces(), player.getAlliance(), board);
     pawnStructureScore += evaluatePawnIslands(playerPawns);
     pawnStructureScore += evaluateDoubledPawns(playerPawns);
     pawnStructureScore += evaluateIsolatedPawns(playerPawns, opponentPawns);
@@ -454,12 +457,16 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param playerPawns The player's pawns.
    * @param opponentPawns The opponent's pawns.
+   * @param opponentPieces The opponent's pieces.
    * @param alliance The alliance of the player.
+   * @param board The current state of the chess board.
    * @return The passed pawns evaluation score.
    */
   private double evaluatePassedPawns(final List<Piece> playerPawns,
                                      final List<Piece> opponentPawns,
-                                     final Alliance alliance) {
+                                     final Collection<Piece> opponentPieces,
+                                     final Alliance alliance,
+                                     final Board board) {
     double passedPawnScore = 0;
 
     for (final Piece pawn : playerPawns) {
@@ -473,7 +480,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
           passedPawnScore += 15;
         }
 
-        if (!opponentPieceControlsSquaresInFront(pawn, alliance, opponentPawns)) {
+        if (!opponentControlsStopSquare(pawn, alliance, opponentPieces, board)) {
           passedPawnScore += 10;
         }
       }
@@ -557,18 +564,21 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Checks if any opponent piece controls squares in front of the pawn.
+   * Checks if any opponent piece controls the stop square of the pawn, meaning the square
+   * directly ahead of it. A piece standing on the stop square counts only if it also bears on
+   * that square, and a pawn with no square ahead of it is reported as uncontrolled.
    *
    * @param pawn The pawn to check.
    * @param alliance The alliance of the pawn.
-   * @param opponentPawns The opponent's pawns.
-   * @return True if opponent pieces control squares in front, false otherwise.
+   * @param opponentPieces The opponent's pieces.
+   * @param board The current state of the chess board.
+   * @return True if an opponent piece controls the stop square, false otherwise.
    */
-  private boolean opponentPieceControlsSquaresInFront(final Piece pawn,
-                                                      final Alliance alliance,
-                                                      final List<Piece> opponentPawns) {
+  private boolean opponentControlsStopSquare(final Piece pawn,
+                                             final Alliance alliance,
+                                             final Collection<Piece> opponentPieces,
+                                             final Board board) {
     final int pawnPosition = pawn.getPiecePosition();
-    final int pawnFile = pawnPosition % 8;
     final int pawnRank = pawnPosition / 8;
 
     final int rankDirection = alliance.isWhite() ? -1 : 1;
@@ -578,13 +588,10 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       return false;
     }
 
-    for (final Piece opponentPawn : opponentPawns) {
-      final int opponentFile = opponentPawn.getPiecePosition() % 8;
-      final int opponentRank = opponentPawn.getPiecePosition() / 8;
+    final int stopSquare = (frontRank * 8) + (pawnPosition % 8);
 
-      if (Math.abs(opponentFile - pawnFile) == 1 &&
-              ((alliance.isWhite() && opponentRank == frontRank + 1) ||
-                      (!alliance.isWhite() && opponentRank == frontRank - 1))) {
+    for (final Piece opponentPiece : opponentPieces) {
+      if (opponentPiece.defendsSquare(stopSquare, board)) {
         return true;
       }
     }
