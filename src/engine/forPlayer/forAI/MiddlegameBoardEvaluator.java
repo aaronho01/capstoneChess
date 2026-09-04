@@ -1276,7 +1276,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     }
 
     spaceScore += spacePiecesControl * 1.0;
-    spaceScore += Math.min(playerMoves.size() - opponentMoves.size(), 10) * 3;
+    final int moveAdvantage = playerMoves.size() - opponentMoves.size();
+    spaceScore += Math.max(-10, Math.min(moveAdvantage, 10)) * 3;
 
     final int[] keySquares = {27, 28, 35, 36};
     for (final int square : keySquares) {
