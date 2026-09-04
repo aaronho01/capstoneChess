@@ -24,9 +24,7 @@ public interface BoardEvaluator {
    * pawn structure, and positional advantages.
    *
    * @param board The current chess board position to evaluate.
-   * @param depth The current search depth in the AI's analysis, which may influence
-   *              evaluation precision and computational considerations.
    * @return A numerical evaluation score where positive values favor white and negative values favor black.
    */
-  double evaluate(Board board, int depth);
+  double evaluate(Board board);
 }

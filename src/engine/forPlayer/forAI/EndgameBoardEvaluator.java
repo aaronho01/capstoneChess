@@ -43,11 +43,10 @@ public class EndgameBoardEvaluator implements BoardEvaluator {
    * white has an advantage and a negative score when black has an advantage.
    *
    * @param board The current state of the chess board.
-   * @param depth The search depth in the AI's thinking process.
    * @return The evaluation score of the board position.
    */
   @Override
-  public double evaluate(final Board board, final int depth) {
+  public double evaluate(final Board board) {
     return (score(board.whitePlayer(), board) - score(board.blackPlayer(), board));
   }
 

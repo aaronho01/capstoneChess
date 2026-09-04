@@ -34,9 +34,6 @@ import java.util.List;
 @SuppressWarnings("JavaPrintToLogpoint")
 public class EvaluationSuite {
 
-  /** The depth passed to every evaluator, held fixed so that depth is not part of the measurement. */
-  private static final int EVALUATION_DEPTH = 0;
-
   /** The largest residual, in centipawns, a position may leave and still be reported as symmetric. */
   private static final double MIRROR_TOLERANCE = 1.0E-6;
 
@@ -285,7 +282,7 @@ public class EvaluationSuite {
   private static double[] scores(final Board board) {
     final double[] scores = new double[EVALUATORS.size()];
     for (int index = 0; index < EVALUATORS.size(); index++) {
-      scores[index] = EVALUATORS.get(index).evaluator().evaluate(board, EVALUATION_DEPTH);
+      scores[index] = EVALUATORS.get(index).evaluator().evaluate(board);
     }
     return scores;
   }

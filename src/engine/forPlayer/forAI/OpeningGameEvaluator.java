@@ -44,12 +44,11 @@ public class OpeningGameEvaluator implements BoardEvaluator {
    * The evaluation considers opening-specific factors with appropriate weightings.
    *
    * @param board The current state of the chess board.
-   * @param depth The search depth in the AI's thinking process.
    * @return The evaluation score of the board from white's perspective.
    */
   @Override
-  public double evaluate(final Board board, final int depth) {
-    return (score(board.whitePlayer(), board, depth) - score(board.blackPlayer(), board, depth));
+  public double evaluate(final Board board) {
+    return (score(board.whitePlayer(), board) - score(board.blackPlayer(), board));
   }
 
   /**
@@ -59,11 +58,10 @@ public class OpeningGameEvaluator implements BoardEvaluator {
    *
    * @param player The player for whom the board position is being evaluated.
    * @param board The current state of the chess board.
-   * @param depth The current search depth for evaluation adjustments.
    * @return The evaluation score from the perspective of the specified player.
    */
   @VisibleForTesting
-  private double score(final Player player, final Board board, final int depth) {
+  private double score(final Player player, final Board board) {
     final int[] defenderCounts = defenderCountsBySquare(player.getActivePieces(), board);
 
     return materialScore(player.getActivePieces()) +
@@ -73,7 +71,7 @@ public class OpeningGameEvaluator implements BoardEvaluator {
             pawnStructureScore(player, board) +
             mobilityScore(player, board) +
             pieceCoordinationScore(player, board, defenderCounts) +
-            tempoScore(player, board, depth) +
+            tempoScore(player, board) +
             pieceSafetyScore(player, board, defenderCounts);
   }
 
@@ -761,15 +759,14 @@ public class OpeningGameEvaluator implements BoardEvaluator {
   }
 
   /**
-   * Evaluates tempo and initiative which are crucial in opening positions.
-   * Rewards attacking moves, development advantage, and initiative-gaining moves.
+   * Evaluates tempo for the given player. Rewards each attacking move, adds a further bonus for
+   * every attack on an undefended piece, and rewards a lead in developed minor pieces.
    *
    * @param player The player whose tempo is being evaluated.
    * @param board The current chess board state.
-   * @param depth The search depth for depth-based tempo considerations.
    * @return The tempo evaluation score.
    */
-  private double tempoScore(final Player player, final Board board, final int depth) {
+  private double tempoScore(final Player player, final Board board) {
     double score = 0;
     Collection<Move> playerMoves = player.getLegalMoves();
     Collection<Piece> playerPieces = player.getActivePieces();
@@ -795,10 +792,6 @@ public class OpeningGameEvaluator implements BoardEvaluator {
 
     if (developedMinorPieces > opponentDevelopedMinorPieces) {
       score += (developedMinorPieces - opponentDevelopedMinorPieces) * 30;
-    }
-
-    if (depth > 5) {
-      score += evaluateInitiative(player, board);
     }
 
     return score;
@@ -996,90 +989,6 @@ public class OpeningGameEvaluator implements BoardEvaluator {
     }
 
     return count;
-  }
-
-  /**
-   * Evaluates initiative factors including space advantage and piece activity.
-   * Used for deeper search depths to consider longer-term initiative.
-   *
-   * @param player The player whose initiative is being evaluated.
-   * @param board The current chess board state.
-   * @return The initiative evaluation score.
-   */
-  private double evaluateInitiative(Player player, Board board) {
-    double score = 0;
-
-    score += evaluateSpaceAdvantage(player, board);
-    score += evaluatePieceActivity(player, board);
-
-    return score;
-  }
-
-  /**
-   * Evaluates space advantage by counting moves into the opponent's territory.
-   * Space control contributes to initiative and attacking potential.
-   *
-   * @param player The player whose space advantage is being evaluated.
-   * @param board The current chess board state.
-   * @return The space advantage evaluation score.
-   */
-  private double evaluateSpaceAdvantage(Player player, Board board) {
-    double score = 0;
-    Alliance alliance = player.getAlliance();
-    Collection<Move> moves = player.getLegalMoves();
-
-    int advancedMoves = 0;
-    for (Move move : moves) {
-      int destRank = move.getDestinationCoordinate() / 8;
-
-      if ((alliance.isWhite() && destRank < 4) ||
-              (!alliance.isWhite() && destRank > 3)) {
-        advancedMoves++;
-      }
-    }
-
-    score += Math.min(advancedMoves, 10) * 2;
-
-    return score;
-  }
-
-  /**
-   * Evaluates piece activity by counting legal moves for non-pawn pieces.
-   * Active pieces contribute to initiative and tactical opportunities.
-   *
-   * @param player The player whose piece activity is being evaluated.
-   * @param board The current chess board state.
-   * @return The piece activity evaluation score.
-   */
-  private double evaluatePieceActivity(Player player, Board board) {
-    double score = 0;
-    Collection<Piece> pieces = player.getActivePieces();
-
-    for (Piece piece : pieces) {
-      if (piece.getPieceType() == Piece.PieceType.KING ||
-              piece.getPieceType() == Piece.PieceType.PAWN) {
-        continue;
-      }
-
-      Collection<Move> pieceMoves = piece.calculateLegalMoves(board);
-
-      switch (piece.getPieceType()) {
-        case KNIGHT:
-          score += pieceMoves.size() * 2;
-          break;
-        case BISHOP:
-          score += pieceMoves.size() * 1.5;
-          break;
-        case ROOK:
-          score += pieceMoves.size();
-          break;
-        case QUEEN:
-          score += pieceMoves.size() * 0.5;
-          break;
-      }
-    }
-
-    return score;
   }
 
   /**

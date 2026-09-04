@@ -654,7 +654,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * Retrieves a cached board evaluation or computes a new evaluation if not found in cache.
    *
    * @param board The board position to evaluate.
-   * @param depth The search depth for the evaluation.
+   * @param depth The search depth the cache entry is keyed under.
    * @return The evaluation score for the board position.
    */
   private double getCachedEvaluation(Board board, int depth) {
@@ -663,7 +663,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       return cachedScore;
     }
 
-    double score = this.evaluator.evaluate(board, depth);
+    double score = this.evaluator.evaluate(board);
     this.evaluationCache.store(board, depth, score);
     return score;
   }

@@ -49,11 +49,10 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * favorable for white and negative values favorable for black.
    *
    * @param board The current state of the chess board.
-   * @param depth The search depth in the AI's thinking process.
    * @return The evaluation score of the board.
    */
   @Override
-  public double evaluate(final Board board, final int depth) {
+  public double evaluate(final Board board) {
     return (score(board.whitePlayer(), board) - score(board.blackPlayer(), board));
   }
 
