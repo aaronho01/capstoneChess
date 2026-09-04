@@ -303,6 +303,9 @@ public class OpeningGameEvaluator implements BoardEvaluator {
   /**
    * Evaluates the quality of the pawn shield protecting the castled king.
    * Counts pawns in shield positions and awards bonuses for intact formations.
+   * The shield spans the rank in front of the king across the king's file and its neighbours,
+   * clamped to the board edge, so a king on the a or h file has two shield squares rather than
+   * three. The king is assumed to stand on its own back rank.
    *
    * @param player The player whose pawn shield is being evaluated.
    * @param kingPosition The position of the king on the board.
@@ -317,39 +320,19 @@ public class OpeningGameEvaluator implements BoardEvaluator {
 
     int kingFile = kingPosition % 8;
     int kingRank = kingPosition / 8;
-    boolean isKingSide = (kingFile >= 5);
+    int shieldRank = player.getAlliance().isWhite() ? kingRank - 1 : kingRank + 1;
 
     List<Integer> shieldSquares = new ArrayList<>();
-    if (isKingSide) {
-      if (player.getAlliance().isWhite()) {
-        shieldSquares.add(kingPosition - 9);
-        shieldSquares.add(kingPosition - 8);
-        shieldSquares.add(kingPosition - 7);
-      } else {
-        shieldSquares.add(kingPosition + 7);
-        shieldSquares.add(kingPosition + 8);
-        shieldSquares.add(kingPosition + 9);
-      }
-    } else {
-      if (player.getAlliance().isWhite()) {
-        shieldSquares.add(kingPosition - 9);
-        shieldSquares.add(kingPosition - 8);
-        shieldSquares.add(kingPosition - 7);
-      } else {
-        shieldSquares.add(kingPosition + 7);
-        shieldSquares.add(kingPosition + 8);
-        shieldSquares.add(kingPosition + 9);
-      }
+    for (int file = Math.max(0, kingFile - 1); file <= Math.min(7, kingFile + 1); file++) {
+      shieldSquares.add(shieldRank * 8 + file);
     }
 
     int pawnsInShield = 0;
     for (Integer shieldSquare : shieldSquares) {
-      if (shieldSquare >= 0 && shieldSquare < 64) {
-        for (Piece pawn : pawns) {
-          if (pawn.getPiecePosition() == shieldSquare) {
-            pawnsInShield++;
-            break;
-          }
+      for (Piece pawn : pawns) {
+        if (pawn.getPiecePosition() == shieldSquare) {
+          pawnsInShield++;
+          break;
         }
       }
     }
