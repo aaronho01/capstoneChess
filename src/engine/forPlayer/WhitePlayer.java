@@ -2,7 +2,6 @@ package engine.forPlayer;
 
 import engine.Alliance;
 import engine.forBoard.Board;
-import engine.forBoard.BoardUtils;
 import engine.forBoard.Move;
 import engine.forPiece.Piece;
 import engine.forPiece.Rook;
@@ -44,8 +43,8 @@ public final class WhitePlayer extends Player {
   /**
    * Calculates and returns the possible king-side and queen-side castling moves for the white player.
    * A castling move is legal only when specific conditions are met including unmoved king and rook,
-   * clear path between pieces, no check situations, and absence of king pawn traps. The method
-   * validates both king-side and queen-side castling opportunities according to chess rules.
+   * clear path between pieces, and no check situations. The method validates both king-side and
+   * queen-side castling opportunities according to chess rules.
    * <p>
    * King-side castling requires the king to move from e1 to g1 and the rook from h1 to f1.
    * Queen-side castling requires the king to move from e1 to c1 and the rook from a1 to d1.
@@ -67,9 +66,7 @@ public final class WhitePlayer extends Player {
           if(!Player.isSquareAttacked(61, opponentPieces, this.board) &&
                   !Player.isSquareAttacked(62, opponentPieces, this.board) &&
                   kingSideRook.getPieceType() == ROOK) {
-            if(BoardUtils.isKingPawnTrap(this.board, this.playerKing, 52)) {
-              kingCastles.add(new Move.KingSideCastleMove(this.board, this.playerKing, 62, (Rook) kingSideRook, kingSideRook.getPiecePosition(), 61));
-            }
+            kingCastles.add(new Move.KingSideCastleMove(this.board, this.playerKing, 62, (Rook) kingSideRook, kingSideRook.getPiecePosition(), 61));
           }
         }
       } if(this.board.getPiece(59) == null && this.board.getPiece(58) == null &&
@@ -78,9 +75,7 @@ public final class WhitePlayer extends Player {
         if(queenSideRook != null && queenSideRook.isFirstMove()) {
           if(!Player.isSquareAttacked(58, opponentPieces, this.board) &&
                   !Player.isSquareAttacked(59, opponentPieces, this.board) && queenSideRook.getPieceType() == ROOK) {
-            if(BoardUtils.isKingPawnTrap(this.board, this.playerKing, 52)) {
-              kingCastles.add(new Move.QueenSideCastleMove(this.board, this.playerKing, 58, (Rook) queenSideRook, queenSideRook.getPiecePosition(), 59));
-            }
+            kingCastles.add(new Move.QueenSideCastleMove(this.board, this.playerKing, 58, (Rook) queenSideRook, queenSideRook.getPiecePosition(), 59));
           }
         }
       }

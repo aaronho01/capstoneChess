@@ -1,6 +1,5 @@
 package engine.forBoard;
 
-import engine.forPiece.King;
 import engine.forPiece.Piece;
 import engine.forPlayer.Player;
 
@@ -205,24 +204,6 @@ public enum BoardUtils {
     } finally {
       move.unmakeMove(board, undo);
     }
-  }
-
-  /**
-   * Checks if a king is pawn-trapped, meaning it is blocked by pawns and unable to move.
-   * This method examines if a specific tile in front of the king is occupied by an enemy pawn.
-   *
-   * @param board The current state of the board.
-   * @param king The king to check.
-   * @param frontTile The tile in front of the king.
-   * @return True if the king is not pawn-trapped, false if it is trapped.
-   */
-  public static boolean isKingPawnTrap(final Board board,
-                                       final King king,
-                                       final int frontTile) {
-    final Piece piece = board.getPiece(frontTile);
-    return piece == null ||
-            piece.getPieceType() != Piece.PieceType.PAWN ||
-            piece.getPieceAllegiance() == king.getPieceAllegiance();
   }
 
   /**
