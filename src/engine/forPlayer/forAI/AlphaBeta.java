@@ -790,9 +790,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       if (rootIsWhite ? score > bestScore : score < bestScore) {
         bestScore = score;
         bestMove = move;
-        recordCounterMove(board, move);
 
         if (rootIsWhite ? bestScore >= beta : bestScore <= alpha) {
+          recordCounterMove(board, move);
           break;
         }
       }
@@ -1072,19 +1072,16 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         currentAlpha = currentValue;
         bestFoundMove = move;
 
-        if (!move.isAttack()) {
-          if (!move.equals(killers[0][ply])) {
-            killers[1][ply] = killers[0][ply];
-            killers[0][ply] = move;
-          }
-        }
-
-        recordCounterMove(board, move);
-
         if (currentAlpha >= beta) {
           if (!move.isAttack()) {
+            if (!move.equals(killers[0][ply])) {
+              killers[1][ply] = killers[0][ply];
+              killers[0][ply] = move;
+            }
             historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
           }
+
+          recordCounterMove(board, move);
 
           storeIfSearching(zobristHash, scoreToTable(beta, ply), depth,
                   TranspositionTable.LOWERBOUND, bestFoundMove);
@@ -1264,19 +1261,16 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         currentBeta = currentValue;
         bestFoundMove = move;
 
-        if (!move.isAttack()) {
-          if (!move.equals(killers[0][ply])) {
-            killers[1][ply] = killers[0][ply];
-            killers[0][ply] = move;
-          }
-        }
-
-        recordCounterMove(board, move);
-
         if (currentBeta <= alpha) {
           if (!move.isAttack()) {
+            if (!move.equals(killers[0][ply])) {
+              killers[1][ply] = killers[0][ply];
+              killers[0][ply] = move;
+            }
             historyHeuristic[move.getCurrentCoordinate()][move.getDestinationCoordinate()] += depth * depth;
           }
+
+          recordCounterMove(board, move);
 
           storeIfSearching(zobristHash, scoreToTable(alpha, ply), depth,
                   TranspositionTable.UPPERBOUND, bestFoundMove);
