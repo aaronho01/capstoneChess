@@ -116,6 +116,14 @@ public final class Board {
   private final Deque<PlayerState> nullMovePlayerUndoStack = new ArrayDeque<>();
 
   /**
+   * How many null moves applied through {@link #makeNullMove()} have not yet been unmade. While
+   * this is greater than zero, {@link #makeMove(Move)} and {@link #unmakeMove()} leave
+   * {@link #positionCounts} alone and {@link #repetitionCount()} reports one, so no position
+   * below a null move is counted toward or scored as a repetition.
+   */
+  private int nullMoveDepth;
+
+  /**
    * PlayerState holds the {@link Player} objects that stood on this board before a single
    * mutation, so that reversing that mutation can put them back rather than build replacements.
    * A restored player describes the restored position exactly, including any legal move list it
@@ -287,11 +295,15 @@ public final class Board {
 
   /**
    * Returns how many times the current position has been reached along this board's make and
-   * unmake path, counting the present occurrence.
+   * unmake path, counting the present occurrence. Returns one while a null move applied through
+   * {@link #makeNullMove()} is still in effect.
    *
    * @return The number of occurrences of the current position.
    */
   public int repetitionCount() {
+    if (this.nullMoveDepth > 0) {
+      return 1;
+    }
     return this.positionCounts.getOrDefault(this.zobristHash, 1);
   }
 
@@ -480,7 +492,9 @@ public final class Board {
     this.playerUndoStack.push(new PlayerState(this.whitePlayer, this.blackPlayer));
     refreshPlayers(nextMover);
     this.undoStack.push(undo);
-    this.positionCounts.merge(this.zobristHash, 1, Integer::sum);
+    if (this.nullMoveDepth == 0) {
+      this.positionCounts.merge(this.zobristHash, 1, Integer::sum);
+    }
     this.plyCount++;
   }
 
@@ -494,9 +508,11 @@ public final class Board {
     if (this.undoStack.isEmpty()) {
       throw new IllegalStateException("No move on the undo stack to unmake.");
     }
-    final int remaining = this.positionCounts.merge(this.zobristHash, -1, Integer::sum);
-    if (remaining <= 0) {
-      this.positionCounts.remove(this.zobristHash);
+    if (this.nullMoveDepth == 0) {
+      final int remaining = this.positionCounts.merge(this.zobristHash, -1, Integer::sum);
+      if (remaining <= 0) {
+        this.positionCounts.remove(this.zobristHash);
+      }
     }
     final UndoState undo = this.undoStack.pop();
     final PlayerState priorPlayers = this.playerUndoStack.pop();
@@ -516,6 +532,8 @@ public final class Board {
    * <p>
    * {@link #positionCounts} is deliberately not touched. A null move position is synthetic and
    * was never reached in a real game, so counting it toward threefold repetition would be wrong.
+   * For the same reason, positions reached by real moves made while this null move is still in
+   * effect are neither counted nor reported as repetitions.
    */
   public void makeNullMove() {
     final NullMoveUndo undo = new NullMoveUndo(this.enPassantPawn, this.zobristHash,
@@ -534,6 +552,7 @@ public final class Board {
     this.nullMovePlayerUndoStack.push(new PlayerState(this.whitePlayer, this.blackPlayer));
     refreshPlayers(nextMover);
     this.nullMoveUndoStack.push(undo);
+    this.nullMoveDepth++;
   }
 
   /**
@@ -553,6 +572,7 @@ public final class Board {
     this.halfMoveClock = undo.priorHalfMoveClock();
     this.transitionMove = undo.priorTransitionMove();
     restorePlayers(priorPlayers, undo.priorMoveMaker());
+    this.nullMoveDepth--;
   }
 
   /**
