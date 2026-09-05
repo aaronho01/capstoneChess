@@ -260,17 +260,32 @@ public class AlphaBeta extends Observable implements MoveStrategy {
           givesCheck.put(move, BoardUtils.kingThreat(move, probeBoard));
         }
 
+        // The two score comparisons take their operands reversed, so that a higher static exchange
+        // score and a higher history score each sort first.
         sortedMoves.sort((move1, move2) -> ComparisonChain.start()
                 .compareTrueFirst(givesCheck.getOrDefault(move1, false),
                         givesCheck.getOrDefault(move2, false))
                 .compareTrueFirst(move1.isCastlingMove(), move2.isCastlingMove())
-                .compare(
-                        move1.isAttack() ? seeScores.getOrDefault(move1, 0) : -1000,
-                        move2.isAttack() ? seeScores.getOrDefault(move2, 0) : -1000
-                )
-                .compare(historyScores.getOrDefault(move1, 0), historyScores.getOrDefault(move2, 0))
+                .compare(captureRankOf(move1, seeScores), captureRankOf(move2, seeScores))
+                .compare(seeScores.getOrDefault(move2, 0), seeScores.getOrDefault(move1, 0))
+                .compare(historyScores.getOrDefault(move2, 0), historyScores.getOrDefault(move1, 0))
                 .result());
         return sortedMoves;
+      }
+
+      /**
+       * Returns the ordering rank of the given move, which places a good capture before a quiet
+       * move and a quiet move before a bad capture.
+       *
+       * @param move The move to rank.
+       * @param seeScores The static exchange scores of the capturing moves being sorted.
+       * @return GOOD_CAPTURE_RANK, QUIET_RANK, or BAD_CAPTURE_RANK.
+       */
+      private long captureRankOf(final Move move, final Map<Move, Integer> seeScores) {
+        if (!move.isAttack()) {
+          return QUIET_RANK;
+        }
+        return seeScores.getOrDefault(move, 0) >= 0 ? GOOD_CAPTURE_RANK : BAD_CAPTURE_RANK;
       }
 
       /**
