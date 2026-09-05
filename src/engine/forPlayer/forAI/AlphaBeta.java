@@ -113,6 +113,9 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The least remaining depth at which a null move cutoff is verified before it is taken. */
   private static final int NULL_MOVE_VERIFICATION_DEPTH = 6;
 
+  /** The width of a zero window, being the smallest score separation the search distinguishes. */
+  private static final double ZERO_WINDOW = 0.1;
+
   /** The move count threshold for applying late move reductions. */
   private static final int LMR_THRESHOLD = 9;
 
@@ -988,12 +991,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
 
     if (depth >= NULL_MOVE_DEPTH && nullMoveAllowed && !inCheckAtNode
-            && hasNonPawnMaterial(board.currentPlayer())) {
+            && beta < Double.MAX_VALUE && hasNonPawnMaterial(board.currentPlayer())) {
       final int R = 2 + depth / 6;
       double nullMoveScore;
       board.makeNullMove();
       try {
-        nullMoveScore = min(board, depth - 1 - R, alpha, beta, ply + 1, false);
+        nullMoveScore = min(board, depth - 1 - R, beta - ZERO_WINDOW, beta, ply + 1, false);
       } finally {
         board.unmakeNullMove();
       }
@@ -1181,12 +1184,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     }
 
     if (depth >= NULL_MOVE_DEPTH && nullMoveAllowed && !inCheckAtNode
-            && hasNonPawnMaterial(board.currentPlayer())) {
+            && alpha > -Double.MAX_VALUE && hasNonPawnMaterial(board.currentPlayer())) {
       final int R = 2 + depth / 6;
       double nullMoveScore;
       board.makeNullMove();
       try {
-        nullMoveScore = max(board, depth - 1 - R, alpha, beta, ply + 1, false);
+        nullMoveScore = max(board, depth - 1 - R, alpha, alpha + ZERO_WINDOW, ply + 1, false);
       } finally {
         board.unmakeNullMove();
       }
