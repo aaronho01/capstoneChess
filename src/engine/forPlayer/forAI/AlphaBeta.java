@@ -107,6 +107,12 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   /** The depth threshold for applying futility pruning. */
   private static final int FUTILITY_PRUNING_DEPTH = 3;
 
+  /** The least remaining depth at which a null move is searched. */
+  private static final int NULL_MOVE_DEPTH = 3;
+
+  /** The least remaining depth at which a null move cutoff is verified before it is taken. */
+  private static final int NULL_MOVE_VERIFICATION_DEPTH = 6;
+
   /** The move count threshold for applying late move reductions. */
   private static final int LMR_THRESHOLD = 9;
 
@@ -981,21 +987,19 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    if (depth >= 3 && nullMoveAllowed && !inCheckAtNode
+    if (depth >= NULL_MOVE_DEPTH && nullMoveAllowed && !inCheckAtNode
             && hasNonPawnMaterial(board.currentPlayer())) {
       final int R = 2 + depth / 6;
-      boolean nullMovePrunes = false;
+      double nullMoveScore;
       board.makeNullMove();
       try {
-        double nullMoveScore = min(board, depth - 1 - R, alpha, beta, ply + 1, false);
-        if (nullMoveScore >= beta) {
-          nullMovePrunes = depth < 6
-                  || min(board, depth - 4, alpha, beta, ply + 1, false) >= beta;
-        }
+        nullMoveScore = min(board, depth - 1 - R, alpha, beta, ply + 1, false);
       } finally {
         board.unmakeNullMove();
       }
-      if (nullMovePrunes) {
+      if (nullMoveScore >= beta
+              && (depth < NULL_MOVE_VERIFICATION_DEPTH
+                      || max(board, depth - R, alpha, beta, ply, false) >= beta)) {
         return beta;
       }
     }
@@ -1176,21 +1180,19 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       }
     }
 
-    if (depth >= 3 && nullMoveAllowed && !inCheckAtNode
+    if (depth >= NULL_MOVE_DEPTH && nullMoveAllowed && !inCheckAtNode
             && hasNonPawnMaterial(board.currentPlayer())) {
       final int R = 2 + depth / 6;
-      boolean nullMovePrunes = false;
+      double nullMoveScore;
       board.makeNullMove();
       try {
-        double nullMoveScore = max(board, depth - 1 - R, alpha, beta, ply + 1, false);
-        if (nullMoveScore <= alpha) {
-          nullMovePrunes = depth < 6
-                  || max(board, depth - 4, alpha, beta, ply + 1, false) <= alpha;
-        }
+        nullMoveScore = max(board, depth - 1 - R, alpha, beta, ply + 1, false);
       } finally {
         board.unmakeNullMove();
       }
-      if (nullMovePrunes) {
+      if (nullMoveScore <= alpha
+              && (depth < NULL_MOVE_VERIFICATION_DEPTH
+                      || min(board, depth - R, alpha, beta, ply, false) <= alpha)) {
         return alpha;
       }
     }
