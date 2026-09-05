@@ -772,8 +772,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       double score;
       try {
         score = rootIsWhite ?
-                min(board, depth - 1, bestScore, beta, 1) :
-                max(board, depth - 1, alpha, bestScore, 1);
+                min(board, depth - 1, bestScore, beta, 1, true) :
+                max(board, depth - 1, alpha, bestScore, 1, true);
       } finally {
         board.unmakeMove();
       }
@@ -914,9 +914,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * @param alpha The alpha bound.
    * @param beta The beta bound.
    * @param ply The current search ply.
+   * @param nullMoveAllowed Whether a null move may be played at this node.
    * @return The best evaluation score for the maximizing player.
    */
-  private double max(final Board board, int depth, double alpha, double beta, int ply) {
+  private double max(final Board board, int depth, double alpha, double beta, int ply,
+                     boolean nullMoveAllowed) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
     if (limitReached(stats)) {
@@ -972,21 +974,23 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     Move ttMove = entry != null ? entry.move : null;
     if (ttMove == null && depth >= 4) {
-      max(board, depth - 2, alpha, beta, ply);
+      max(board, depth - 2, alpha, beta, ply, nullMoveAllowed);
       entry = transpositionTable.get(zobristHash);
       if (entry != null) {
         ttMove = entry.move;
       }
     }
 
-    if (depth >= 3 && !inCheckAtNode && hasNonPawnMaterial(board.currentPlayer())) {
+    if (depth >= 3 && nullMoveAllowed && !inCheckAtNode
+            && hasNonPawnMaterial(board.currentPlayer())) {
       final int R = 2 + depth / 6;
       boolean nullMovePrunes = false;
       board.makeNullMove();
       try {
-        double nullMoveScore = min(board, depth - 1 - R, alpha, beta, ply + 1);
+        double nullMoveScore = min(board, depth - 1 - R, alpha, beta, ply + 1, false);
         if (nullMoveScore >= beta) {
-          nullMovePrunes = depth < 6 || min(board, depth - 4, alpha, beta, ply + 1) >= beta;
+          nullMovePrunes = depth < 6
+                  || min(board, depth - 4, alpha, beta, ply + 1, false) >= beta;
         }
       } finally {
         board.unmakeNullMove();
@@ -1038,7 +1042,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         }
 
         if (firstMove) {
-          currentValue = min(board, newDepth, currentAlpha, beta, ply + 1);
+          currentValue = min(board, newDepth, currentAlpha, beta, ply + 1, true);
         } else {
           int reduction = 0;
           if (depth >= 3 && movesSearched >= 4 && !move.isAttack() && !inCheckAtNode) {
@@ -1046,10 +1050,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             if (reduction > 3) reduction = 3;
           }
 
-          currentValue = min(board, newDepth - reduction, currentAlpha, currentAlpha + 0.1, ply + 1);
+          currentValue = min(board, newDepth - reduction, currentAlpha, currentAlpha + 0.1,
+                  ply + 1, true);
 
           if (currentValue > currentAlpha && currentValue < beta) {
-            currentValue = min(board, newDepth, currentAlpha, beta, ply + 1);
+            currentValue = min(board, newDepth, currentAlpha, beta, ply + 1, true);
           }
         }
       } finally {
@@ -1104,9 +1109,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
    * @param alpha The alpha bound.
    * @param beta The beta bound.
    * @param ply The current search ply.
+   * @param nullMoveAllowed Whether a null move may be played at this node.
    * @return The best evaluation score for the minimizing player.
    */
-  private double min(final Board board, int depth, double alpha, double beta, int ply) {
+  private double min(final Board board, int depth, double alpha, double beta, int ply,
+                     boolean nullMoveAllowed) {
     SearchStats stats = threadStats.get();
     stats.boardsEvaluated++;
     if (limitReached(stats)) {
@@ -1162,21 +1169,23 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     Move ttMove = entry != null ? entry.move : null;
     if (ttMove == null && depth >= 4) {
-      min(board, depth - 2, alpha, beta, ply);
+      min(board, depth - 2, alpha, beta, ply, nullMoveAllowed);
       entry = transpositionTable.get(zobristHash);
       if (entry != null) {
         ttMove = entry.move;
       }
     }
 
-    if (depth >= 3 && !inCheckAtNode && hasNonPawnMaterial(board.currentPlayer())) {
+    if (depth >= 3 && nullMoveAllowed && !inCheckAtNode
+            && hasNonPawnMaterial(board.currentPlayer())) {
       final int R = 2 + depth / 6;
       boolean nullMovePrunes = false;
       board.makeNullMove();
       try {
-        double nullMoveScore = max(board, depth - 1 - R, alpha, beta, ply + 1);
+        double nullMoveScore = max(board, depth - 1 - R, alpha, beta, ply + 1, false);
         if (nullMoveScore <= alpha) {
-          nullMovePrunes = depth < 6 || max(board, depth - 4, alpha, beta, ply + 1) <= alpha;
+          nullMovePrunes = depth < 6
+                  || max(board, depth - 4, alpha, beta, ply + 1, false) <= alpha;
         }
       } finally {
         board.unmakeNullMove();
@@ -1228,7 +1237,7 @@ public class AlphaBeta extends Observable implements MoveStrategy {
         }
 
         if (firstMove) {
-          currentValue = max(board, newDepth, alpha, currentBeta, ply + 1);
+          currentValue = max(board, newDepth, alpha, currentBeta, ply + 1, true);
         } else {
           int reduction = 0;
           if (depth >= 3 && movesSearched >= 4 && !move.isAttack() && !inCheckAtNode) {
@@ -1236,10 +1245,11 @@ public class AlphaBeta extends Observable implements MoveStrategy {
             if (reduction > 3) reduction = 3;
           }
 
-          currentValue = max(board, newDepth - reduction, currentBeta - 0.1, currentBeta, ply + 1);
+          currentValue = max(board, newDepth - reduction, currentBeta - 0.1, currentBeta,
+                  ply + 1, true);
 
           if (currentValue < currentBeta && currentValue > alpha) {
-            currentValue = max(board, newDepth, alpha, currentBeta, ply + 1);
+            currentValue = max(board, newDepth, alpha, currentBeta, ply + 1, true);
           }
         }
       } finally {
@@ -1336,8 +1346,8 @@ public class AlphaBeta extends Observable implements MoveStrategy {
     // at the ply of this node rather than the next one, because no move was made on the way in.
     if (board.currentPlayer().isInCheck()) {
       return maximizing ?
-              max(board, 1, alpha, beta, ply) :
-              min(board, 1, alpha, beta, ply);
+              max(board, 1, alpha, beta, ply, true) :
+              min(board, 1, alpha, beta, ply, true);
     }
 
     final double originalAlpha = alpha;
