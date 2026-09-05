@@ -1316,6 +1316,15 @@ public class AlphaBeta extends Observable implements MoveStrategy {
       return terminalScore(board, ply);
     }
 
+    // A side that is in check cannot decline to move, so the static score is not a bound on what
+    // this node can reach and must not narrow the window or cut the node off. Evasions are searched
+    // at the ply of this node rather than the next one, because no move was made on the way in.
+    if (board.currentPlayer().isInCheck()) {
+      return maximizing ?
+              max(board, 1, alpha, beta, ply) :
+              min(board, 1, alpha, beta, ply);
+    }
+
     final double originalAlpha = alpha;
     final double originalBeta = beta;
 
@@ -1339,12 +1348,6 @@ public class AlphaBeta extends Observable implements MoveStrategy {
 
     if (maximizing && standPat < alpha - DELTA_MATERIAL) return alpha;
     if (!maximizing && standPat > beta + DELTA_MATERIAL) return beta;
-
-    if (board.currentPlayer().isInCheck()) {
-      return maximizing ?
-              max(board, 1, alpha, beta, ply + 1) :
-              min(board, 1, alpha, beta, ply + 1);
-    }
 
     final Collection<Move> legalMoves = board.currentPlayer().getLegalMoves();
 
