@@ -94,14 +94,18 @@ public class TacticalSuite {
     MATE,
 
     /** A position in which the side to move wins material without forcing checkmate. */
-    MATERIAL
+    MATERIAL,
+
+    /** A position in which the side to move is held to a draw by the fifty-move rule. */
+    DRAW
   }
 
   /**
    * The positions the suite tests, each paired with the moves that win and the depth to search to.
-   * The depth recorded against a position keeps its tactic inside the search horizon with a margin.
-   * The shallowest depth that solves a position is not used, because the move a search returns is
-   * not monotonic in depth.
+   * The depth recorded against a position keeps its tactic inside the search horizon with a margin
+   * and is deep enough for the engine to return the position's expected score, not merely its
+   * expected move. The shallowest depth that solves a position is not used, because the move a
+   * search returns is not monotonic in depth.
    */
   private static final List<TacticalPosition> STANDARD_POSITIONS = List.of(
           new TacticalPosition("Back rank mate", Category.MATE,
@@ -127,7 +131,7 @@ public class TacticalSuite {
                   4, ScoreBand.mateIn(2), "g2g1"),
           new TacticalPosition("Rook lift wins the queen", Category.MATERIAL,
                   "5rk1/1ppb3p/p1pb4/6q1/3P1p1r/2P1R2P/PP1BQ1P1/5RKN w - - 0 1",
-                  6, ScoreBand.atLeast(300), "e3g3"),
+                  10, ScoreBand.atLeast(300), "e3g3"),
           new TacticalPosition("Rook sacrifice wins the knight", Category.MATERIAL,
                   "2br2k1/2q3rn/p2NppQ1/2p1P3/Pp5R/4P3/1P3PPP/3R2K1 w - - 0 1",
                   6, ScoreBand.atLeast(150), "h4h7"),
@@ -142,13 +146,19 @@ public class TacticalSuite {
                   6, ScoreBand.atLeast(100), "f6g4"),
           new TacticalPosition("Queen sacrifice, mate in four", Category.MATE,
                   "r2rb1k1/pp1q1p1p/2n1p1p1/2bp4/5P2/PP1BPR1Q/1BPN2PP/R5K1 w - - 0 1",
-                  8, ScoreBand.mateIn(4), "h3h7"),
+                  10, ScoreBand.mateIn(4), "h3h7"),
           new TacticalPosition("Smothered mate in four", Category.MATE,
                   "5r1k/6pp/8/6N1/8/1Q6/6PP/6K1 w - - 0 1",
-                  8, ScoreBand.mateIn(4), "g5f7"),
+                  10, ScoreBand.mateIn(4), "g5f7"),
           new TacticalPosition("Knight check, mate in four", Category.MATE,
                   "rnbqkb1r/pppp1ppp/8/4P3/6n1/7P/PPPNPnP1/R1BQKBNR b KQkq - 0 1",
-                  8, ScoreBand.mateIn(4), "f2d3"));
+                  8, ScoreBand.mateIn(4), "f2d3"),
+          new TacticalPosition("Fifty-move rule saves the defender", Category.DRAW,
+                  "k7/8/8/8/8/8/2Q5/2K5 b - - 99 60",
+                  6, ScoreBand.drawn(), "a8a7", "a8b7", "a8b8"),
+          new TacticalPosition("Capture resets the fifty-move clock", Category.DRAW,
+                  "7k/8/8/8/1p6/1Q6/8/K7 w - - 99 60",
+                  6, ScoreBand.atLeast(300), "b3b4"));
 
   /**
    * Runs the suite from the command line. With no arguments every position is searched to its own
@@ -518,7 +528,7 @@ public class TacticalSuite {
             distance is a failure.
 
             The category flag restricts the run to the named categories, given in any case and
-            separated by commas. The categories are mate and material. Positions are reported
+            separated by commas. The categories are mate, material, and draw. Positions are reported
             grouped by category whether or not the flag is given.
 
             The workers flag sets how many positions are searched at once, one by default. Every
@@ -571,6 +581,15 @@ public class TacticalSuite {
      */
     public static ScoreBand atLeast(final double advantage) {
       return new ScoreBand(advantage, AlphaBeta.MATE_VALUE, "at least " + (long) advantage);
+    }
+
+    /**
+     * Returns the band accepting only a drawn score.
+     *
+     * @return The band accepting a score of zero and nothing else.
+     */
+    public static ScoreBand drawn() {
+      return new ScoreBand(0, 0, "draw");
     }
 
     /**
