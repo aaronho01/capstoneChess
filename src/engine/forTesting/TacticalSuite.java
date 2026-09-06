@@ -9,7 +9,12 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -58,6 +63,9 @@ public class TacticalSuite {
   /** The command line flag prefix requesting a number of positions to search at once. */
   private static final String WORKERS_FLAG_PREFIX = "--workers=";
 
+  /** The command line flag prefix requesting that only some categories of position be searched. */
+  private static final String CATEGORY_FLAG_PREFIX = "--category=";
+
   /** The command line flag requesting that the engine's own search output be left on screen. */
   private static final String VERBOSE_FLAG = "--verbose";
 
@@ -74,54 +82,68 @@ public class TacticalSuite {
   private static final double NANOSECONDS_PER_SECOND = 1_000_000_000.0;
 
   /**
+   * The kinds of position the suite tests. Positions are reported grouped by category, in the
+   * order the constants are declared in.
+   */
+  public enum Category {
+
+    /** A position in which the side to move has a forced checkmate. */
+    MATE,
+
+    /** A position in which the side to move wins material without forcing checkmate. */
+    MATERIAL
+  }
+
+  /**
    * The positions the suite tests, each paired with the moves that win and the depth to search to.
    * The depth recorded against a position keeps its tactic inside the search horizon with a margin.
    * The shallowest depth that solves a position is not used, because the move a search returns is
    * not monotonic in depth.
    */
   private static final List<TacticalPosition> STANDARD_POSITIONS = List.of(
-          new TacticalPosition("Back rank mate",
+          new TacticalPosition("Back rank mate", Category.MATE,
                   "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1", 2, "a1a8"),
-          new TacticalPosition("Back rank mate by capture",
+          new TacticalPosition("Back rank mate by capture", Category.MATE,
                   "2r3k1/5ppp/8/8/8/8/5PPP/2R3K1 w - - 0 1", 2, "c1c8"),
-          new TacticalPosition("Scholar's mate",
+          new TacticalPosition("Scholar's mate", Category.MATE,
                   "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4", 2, "h5f7"),
-          new TacticalPosition("Queen sacrifice, mate in two",
+          new TacticalPosition("Queen sacrifice, mate in two", Category.MATE,
                   "2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - - 0 1", 4, "g3g6"),
-          new TacticalPosition("Bishop sacrifice, mate in two",
+          new TacticalPosition("Bishop sacrifice, mate in two", Category.MATE,
                   "r1bq2rk/pp3pbp/2p1p1pQ/7P/3P4/2PB1N2/PP3PPR/2KR4 w - - 0 1", 4, "h6h7"),
-          new TacticalPosition("Queen check, mate in two",
+          new TacticalPosition("Queen check, mate in two", Category.MATE,
                   "5k2/6pp/p1qN4/1p1p4/3P4/2PKP2Q/PP3r2/3R4 b - - 0 1", 4, "c6c4"),
-          new TacticalPosition("Rook deflection, mate in two",
+          new TacticalPosition("Rook deflection, mate in two", Category.MATE,
                   "6k1/pp4p1/2p5/2bp4/8/P5Pb/1P3rrP/2BRRN1K b - - 0 1", 4, "g2g1"),
-          new TacticalPosition("Rook lift wins the queen",
+          new TacticalPosition("Rook lift wins the queen", Category.MATERIAL,
                   "5rk1/1ppb3p/p1pb4/6q1/3P1p1r/2P1R2P/PP1BQ1P1/5RKN w - - 0 1", 6, "e3g3"),
-          new TacticalPosition("Rook sacrifice wins the knight",
+          new TacticalPosition("Rook sacrifice wins the knight", Category.MATERIAL,
                   "2br2k1/2q3rn/p2NppQ1/2p1P3/Pp5R/4P3/1P3PPP/3R2K1 w - - 0 1", 6, "h4h7"),
-          new TacticalPosition("Bishop capture wins a piece",
+          new TacticalPosition("Bishop capture wins a piece", Category.MATERIAL,
                   "r1b1kb1r/3q1ppp/pBp1pn2/8/Np3P2/5B2/PPP3PP/R2Q1RK1 w kq - 0 1", 6, "f3c6"),
-          new TacticalPosition("Back rank threat wins the queen",
+          new TacticalPosition("Back rank threat wins the queen", Category.MATERIAL,
                   "3r1r1k/1p4pp/p4p2/8/1PQR4/6Pq/P3PP2/2R3K1 b - - 0 1", 6, "d8c8"),
-          new TacticalPosition("Knight fork wins the exchange",
+          new TacticalPosition("Knight fork wins the exchange", Category.MATERIAL,
                   "8/p7/1ppk1n2/5ppp/P1PP4/2P1K1P1/5N1P/8 b - - 0 1", 6, "f6g4"),
-          new TacticalPosition("Queen sacrifice, mate in four",
+          new TacticalPosition("Queen sacrifice, mate in four", Category.MATE,
                   "r2rb1k1/pp1q1p1p/2n1p1p1/2bp4/5P2/PP1BPR1Q/1BPN2PP/R5K1 w - - 0 1", 8, "h3h7"),
-          new TacticalPosition("Smothered mate in four",
+          new TacticalPosition("Smothered mate in four", Category.MATE,
                   "5r1k/6pp/8/6N1/8/1Q6/6PP/6K1 w - - 0 1", 8, "g5f7"),
-          new TacticalPosition("Knight check, mate in four",
+          new TacticalPosition("Knight check, mate in four", Category.MATE,
                   "rnbqkb1r/pppp1ppp/8/4P3/6n1/7P/PPPNPnP1/R1BQKBNR b KQkq - 0 1", 8, "f2d3"));
 
   /**
    * Runs the suite from the command line. With no arguments every position is searched to its own
-   * recorded depth, a single numeric argument overrides that depth for every position, the workers
-   * flag sets how many positions are searched at once, and the verbose flag leaves the engine's own
-   * search output on screen.
+   * recorded depth, a single numeric argument overrides that depth for every position, the category
+   * flag restricts the run to the named categories, the workers flag sets how many positions are
+   * searched at once, and the verbose flag leaves the engine's own search output on screen.
    *
    * @param args The command line arguments, as described by the usage text.
    */
   public static void main(final String[] args) {
     int depthOverride = NO_DEPTH_OVERRIDE;
     int workerThreads = DEFAULT_WORKER_THREADS;
+    Set<Category> categories = EnumSet.allOf(Category.class);
     boolean verbose = false;
     for (final String argument : args) {
       if (VERBOSE_FLAG.equals(argument)) {
@@ -129,6 +151,14 @@ public class TacticalSuite {
       } else if (HELP_FLAG.equals(argument)) {
         printUsage();
         return;
+      } else if (argument.startsWith(CATEGORY_FLAG_PREFIX)) {
+        try {
+          categories = parseCategories(argument.substring(CATEGORY_FLAG_PREFIX.length()));
+        } catch (final IllegalArgumentException exception) {
+          System.out.println("Unrecognised category: " + argument);
+          printUsage();
+          return;
+        }
       } else if (argument.startsWith(WORKERS_FLAG_PREFIX)) {
         try {
           workerThreads = Integer.parseInt(argument.substring(WORKERS_FLAG_PREFIX.length()));
@@ -157,7 +187,50 @@ public class TacticalSuite {
       printUsage();
       return;
     }
-    System.exit(run(depthOverride, verbose, workerThreads) ? 0 : 1);
+    System.exit(run(depthOverride, verbose, workerThreads, categories) ? 0 : 1);
+  }
+
+  /**
+   * Parses a comma separated list of category names, in any case.
+   *
+   * @param value The list of category names.
+   * @return The categories the list names.
+   * @throws IllegalArgumentException If the list names no category or names one that does not
+   *         exist.
+   */
+  private static Set<Category> parseCategories(final String value) {
+    final Set<Category> categories = EnumSet.noneOf(Category.class);
+    for (final String name : value.split(",")) {
+      final String trimmed = name.trim();
+      if (!trimmed.isEmpty()) {
+        categories.add(Category.valueOf(trimmed.toUpperCase(Locale.ROOT)));
+      }
+    }
+    if (categories.isEmpty()) {
+      throw new IllegalArgumentException("No category was named.");
+    }
+    return categories;
+  }
+
+  /**
+   * Returns the positions belonging to the given categories, grouped by category in the order the
+   * categories are declared in and in list order within a category.
+   *
+   * @param categories The categories to select.
+   * @return The selected positions.
+   */
+  private static List<TacticalPosition> select(final Set<Category> categories) {
+    final List<TacticalPosition> selected = new ArrayList<>(STANDARD_POSITIONS.size());
+    for (final Category category : Category.values()) {
+      if (categories.contains(category)) {
+        for (final TacticalPosition position : STANDARD_POSITIONS) {
+          if (position.category() == category) {
+            selected.add(position);
+          }
+        }
+      }
+    }
+    return selected;
   }
 
   /**
@@ -173,10 +246,7 @@ public class TacticalSuite {
   }
 
   /**
-   * Searches every position in the suite and prints a report of the results. Overriding the depth
-   * downwards is expected to fail positions whose tactic no longer fits inside the horizon. Results
-   * are reported in the order the positions are listed in however the workers are scheduled, and a
-   * verbose run uses a single worker so the engine's output stays readable.
+   * Searches every position in the suite and prints a report of the results.
    *
    * @param depthOverride The depth to search every position to, or zero to use each recorded depth.
    * @param verbose Whether to leave the engine's own search output on screen.
@@ -185,35 +255,69 @@ public class TacticalSuite {
    */
   public static boolean run(final int depthOverride, final boolean verbose,
                             final int requestedWorkers) {
-    final int workers = verbose ? 1 : Math.min(requestedWorkers, STANDARD_POSITIONS.size());
+    return run(depthOverride, verbose, requestedWorkers, EnumSet.allOf(Category.class));
+  }
+
+  /**
+   * Searches every selected position and prints a report of the results. Overriding the depth
+   * downwards is expected to fail positions whose tactic no longer fits inside the horizon.
+   * Results are reported grouped by category, and in list order within a category, however the
+   * workers are scheduled. A verbose run uses a single worker so the engine's output stays
+   * readable.
+   *
+   * @param depthOverride The depth to search every position to, or zero to use each recorded depth.
+   * @param verbose Whether to leave the engine's own search output on screen.
+   * @param requestedWorkers The number of positions to search at once, at least one.
+   * @param categories The categories of position to search, of which at least one must be
+   *        represented in the suite or the run reports a failure.
+   * @return True if every selected position was solved, false otherwise.
+   */
+  public static boolean run(final int depthOverride, final boolean verbose,
+                            final int requestedWorkers, final Set<Category> categories) {
+    final List<TacticalPosition> selected = select(categories);
+    if (selected.isEmpty()) {
+      System.out.println("No position in the suite belongs to any of the requested categories.");
+      return false;
+    }
+    final int workers = verbose ? 1 : Math.min(requestedWorkers, selected.size());
     System.out.printf("Tactical suite: %d positions on %d worker%s%s%n%n",
-            STANDARD_POSITIONS.size(), workers, workers == 1 ? "" : "s",
+            selected.size(), workers, workers == 1 ? "" : "s",
             depthOverride == NO_DEPTH_OVERRIDE ? "" : ", every one searched to depth " + depthOverride);
 
     final PrintStream originalOut = System.out;
     final ExecutorService workerPool = Executors.newFixedThreadPool(workers);
-    final List<Future<PositionOutcome>> outcomes = new ArrayList<>(STANDARD_POSITIONS.size());
-    for (int index = 0; index < STANDARD_POSITIONS.size(); index++) {
+    final List<Future<PositionOutcome>> outcomes = new ArrayList<>(selected.size());
+    for (int index = 0; index < selected.size(); index++) {
       outcomes.add(null);
     }
 
     int solved = 0;
     long totalNodes = 0;
+    final Map<Category, Integer> solvedByCategory = new EnumMap<>(Category.class);
+    final Map<Category, Integer> totalByCategory = new EnumMap<>(Category.class);
     final long startTime = System.nanoTime();
     if (!verbose) {
       System.setOut(new PrintStream(OutputStream.nullOutputStream()));
     }
     try {
-      for (final int index : submissionOrder(depthOverride)) {
-        final TacticalPosition position = STANDARD_POSITIONS.get(index);
+      for (final int index : submissionOrder(selected, depthOverride)) {
+        final TacticalPosition position = selected.get(index);
         outcomes.set(index, workerPool.submit(() -> runPosition(position, depthOverride)));
       }
-      for (int index = 0; index < STANDARD_POSITIONS.size(); index++) {
-        final PositionOutcome outcome = await(outcomes.get(index), STANDARD_POSITIONS.get(index));
+      Category reported = null;
+      for (int index = 0; index < selected.size(); index++) {
+        final TacticalPosition position = selected.get(index);
+        if (position.category() != reported) {
+          reported = position.category();
+          originalOut.printf("== %s ==%n%n", reported);
+        }
+        final PositionOutcome outcome = await(outcomes.get(index), position);
         originalOut.print(outcome.report());
         totalNodes += outcome.nodes();
+        totalByCategory.merge(position.category(), 1, Integer::sum);
         if (outcome.solved()) {
           solved++;
+          solvedByCategory.merge(position.category(), 1, Integer::sum);
         }
       }
     } finally {
@@ -222,9 +326,13 @@ public class TacticalSuite {
     }
 
     final double elapsedSeconds = (System.nanoTime() - startTime) / NANOSECONDS_PER_SECOND;
+    for (final Map.Entry<Category, Integer> entry : totalByCategory.entrySet()) {
+      System.out.printf("%-12s %d of %d solved%n", entry.getKey(),
+              solvedByCategory.getOrDefault(entry.getKey(), 0), entry.getValue());
+    }
     System.out.printf("%d of %d positions solved, %d nodes in %.2fs%n",
-            solved, STANDARD_POSITIONS.size(), totalNodes, elapsedSeconds);
-    return solved == STANDARD_POSITIONS.size();
+            solved, selected.size(), totalNodes, elapsedSeconds);
+    return solved == selected.size();
   }
 
   /**
@@ -232,17 +340,19 @@ public class TacticalSuite {
    * first. Starting the longest searches first keeps a deep position from being picked up last and
    * running on alone after every other worker has finished.
    *
+   * @param selected The positions being searched, in the order they are reported in.
    * @param depthOverride The depth every position is searched to, or zero to use recorded depths.
    * @return The position indices, ordered by descending search depth.
    */
-  private static List<Integer> submissionOrder(final int depthOverride) {
-    final List<Integer> order = new ArrayList<>(STANDARD_POSITIONS.size());
-    for (int index = 0; index < STANDARD_POSITIONS.size(); index++) {
+  private static List<Integer> submissionOrder(final List<TacticalPosition> selected,
+                                               final int depthOverride) {
+    final List<Integer> order = new ArrayList<>(selected.size());
+    for (int index = 0; index < selected.size(); index++) {
       order.add(index);
     }
     if (depthOverride == NO_DEPTH_OVERRIDE) {
       order.sort(Comparator.comparingInt(
-              (Integer index) -> STANDARD_POSITIONS.get(index).searchDepth()).reversed());
+              (Integer index) -> selected.get(index).searchDepth()).reversed());
     }
     return order;
   }
@@ -368,12 +478,16 @@ public class TacticalSuite {
   private static void printUsage() {
     System.out.println("""
             Usage:
-              TacticalSuite [depth] [--workers=N] [--verbose]
+              TacticalSuite [depth] [--category=NAME,...] [--workers=N] [--verbose]
               TacticalSuite --help                     print this message
 
             A depth argument overrides the depth recorded against every position. Positions are
             recorded at a depth that keeps the tactic inside the search horizon with a margin, so
             overriding downwards is expected to fail some of them.
+
+            The category flag restricts the run to the named categories, given in any case and
+            separated by commas. The categories are mate and material. Positions are reported
+            grouped by category whether or not the flag is given.
 
             The workers flag sets how many positions are searched at once, one by default. Every
             worker holds a transposition table for as long as its position is running, so raising
@@ -399,23 +513,26 @@ public class TacticalSuite {
    * winning move.
    *
    * @param name The tactic the position illustrates.
+   * @param category The kind of position this is, which the report is grouped by.
    * @param fen The Forsyth-Edwards Notation string describing the position.
    * @param searchDepth The depth this position is searched to when no override is given.
    * @param acceptedMoves The winning moves, in long algebraic notation.
    */
-  public record TacticalPosition(String name, String fen, int searchDepth, List<String> acceptedMoves) {
+  public record TacticalPosition(String name, Category category, String fen, int searchDepth,
+                                 List<String> acceptedMoves) {
 
     /**
      * Constructs a position whose accepted moves are given one after another.
      *
      * @param name The tactic the position illustrates.
+     * @param category The kind of position this is, which the report is grouped by.
      * @param fen The Forsyth-Edwards Notation string describing the position.
      * @param searchDepth The depth this position is searched to when no override is given.
      * @param acceptedMoves The winning moves, in long algebraic notation.
      */
-    public TacticalPosition(final String name, final String fen, final int searchDepth,
-                            final String... acceptedMoves) {
-      this(name, fen, searchDepth, List.of(acceptedMoves));
+    public TacticalPosition(final String name, final Category category, final String fen,
+                            final int searchDepth, final String... acceptedMoves) {
+      this(name, category, fen, searchDepth, List.of(acceptedMoves));
     }
 
     /**
