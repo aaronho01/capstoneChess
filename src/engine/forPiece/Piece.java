@@ -144,6 +144,18 @@ public abstract class Piece {
   public abstract boolean defendsSquare(final int targetSquare, final Board board);
 
   /**
+   * Increments the entry of the given array for every square this piece defends on the given
+   * board, which is every square for which {@link #defendsSquare(int, Board)} returns true. The
+   * array holds one entry per tile and is indexed by square. A piece never defends its own
+   * square, so its own entry is left alone.
+   *
+   * @param board The current board.
+   * @param defenderCounts The per square counts to increment, of length {@link
+   *                       BoardUtils#NUM_TILES}.
+   */
+  public abstract void addDefendedSquares(final Board board, final int[] defenderCounts);
+
+  /**
    * Determines whether this piece attacks the given square on the given board, without
    * allocating any {@link Move} objects. A defended square is attacked unless a piece of this
    * piece's own alliance stands on it, so this mirrors exactly the destinations {@link

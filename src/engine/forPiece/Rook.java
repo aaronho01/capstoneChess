@@ -148,6 +148,27 @@ public final class Rook extends Piece {
   }
 
   /**
+   * Increments the entry of the given array for every square this rook defends on the given
+   * board.
+   *
+   * @param board The current board.
+   * @param defenderCounts The per square counts to increment, of length {@link
+   *                       BoardUtils#NUM_TILES}.
+   */
+  @Override
+  public void addDefendedSquares(final Board board, final int[] defenderCounts) {
+    final Line[] lines = PRECOMPUTED_CANDIDATES[this.piecePosition];
+    for (final Line line : lines) {
+      for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
+        defenderCounts[candidateDestinationCoordinate]++;
+        if (board.getPiece(candidateDestinationCoordinate) != null) {
+          break;
+        }
+      }
+    }
+  }
+
+  /**
    * Provides a location bonus value for the rook piece on the board. The bonus is determined based on the rook's
    * current position and alliance, contributing to the evaluation of the piece's strategic importance.
    *

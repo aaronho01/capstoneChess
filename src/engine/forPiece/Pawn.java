@@ -201,6 +201,31 @@ public final class Pawn extends Piece {
   }
 
   /**
+   * Increments the entry of the given array for every square this pawn defends on the given
+   * board, being its two capture squares.
+   *
+   * @param board The current board.
+   * @param defenderCounts The per square counts to increment, of length {@link
+   *                       BoardUtils#NUM_TILES}.
+   */
+  @Override
+  public void addDefendedSquares(final Board board, final int[] defenderCounts) {
+    final int candidateSeven = this.piecePosition + (this.pieceAlliance.getDirection() * 7);
+    if (BoardUtils.isValidTileCoordinate(candidateSeven) &&
+            !((BoardUtils.Instance.EighthColumn.get(this.piecePosition) && this.pieceAlliance.isWhite()) ||
+                    (BoardUtils.Instance.FirstColumn.get(this.piecePosition) && this.pieceAlliance.isBlack()))) {
+      defenderCounts[candidateSeven]++;
+    }
+
+    final int candidateNine = this.piecePosition + (this.pieceAlliance.getDirection() * 9);
+    if (BoardUtils.isValidTileCoordinate(candidateNine) &&
+            !((BoardUtils.Instance.FirstColumn.get(this.piecePosition) && this.pieceAlliance.isWhite()) ||
+                    (BoardUtils.Instance.EighthColumn.get(this.piecePosition) && this.pieceAlliance.isBlack()))) {
+      defenderCounts[candidateNine]++;
+    }
+  }
+
+  /**
    * Returns the string representation of this pawn piece.
    *
    * @return The string representation of the pawn piece type.

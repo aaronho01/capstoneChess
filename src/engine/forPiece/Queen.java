@@ -151,6 +151,27 @@ public final class Queen extends Piece {
   }
 
   /**
+   * Increments the entry of the given array for every square this queen defends on the given
+   * board.
+   *
+   * @param board The current board.
+   * @param defenderCounts The per square counts to increment, of length {@link
+   *                       BoardUtils#NUM_TILES}.
+   */
+  @Override
+  public void addDefendedSquares(final Board board, final int[] defenderCounts) {
+    final MoveUtils.Line[] lines = PRECOMPUTED_CANDIDATES[this.piecePosition];
+    for (final MoveUtils.Line line : lines) {
+      for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
+        defenderCounts[candidateDestinationCoordinate]++;
+        if (board.getPiece(candidateDestinationCoordinate) != null) {
+          break;
+        }
+      }
+    }
+  }
+
+  /**
    * Calculates and returns the positional bonus value for the queen at its current location.
    * The bonus is determined by the alliance-specific evaluation function which considers
    * strategic factors such as centralization and development timing.

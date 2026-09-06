@@ -1136,6 +1136,11 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
 
     int[] squareAttackCount = new int[BoardUtils.NUM_TILES];
     int[] squarePawnAttackCount = new int[BoardUtils.NUM_TILES];
+    int[] defenderCount = new int[BoardUtils.NUM_TILES];
+
+    for (final Piece piece : playerPieces) {
+      piece.addDefendedSquares(board, defenderCount);
+    }
 
     for (final Move move : opponent.getLegalMoves()) {
       final int destination = move.getDestinationCoordinate();
@@ -1149,7 +1154,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       if (piece.getPieceType() == Piece.PieceType.KING) continue;
 
       final int position = piece.getPiecePosition();
-      final int protectionCount = countDefenders(playerPieces, position, board);
+      final int protectionCount = defenderCount[position];
       final int attackCount = squareAttackCount[position];
 
       if (attackCount > 0) {
@@ -1185,30 +1190,6 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     }
 
     return protectionScore;
-  }
-
-  /**
-   * Counts the pieces in the given collection that defend the given square. The piece standing on
-   * the square is not counted, and a piece whose line to the square is blocked by another piece
-   * does not count.
-   *
-   * @param playerPieces The pieces to test.
-   * @param square The square to test.
-   * @param board The current chess board state.
-   * @return The number of pieces in the collection that defend the square.
-   */
-  private static int countDefenders(final Collection<Piece> playerPieces,
-                                    final int square,
-                                    final Board board) {
-    int defenders = 0;
-
-    for (final Piece piece : playerPieces) {
-      if (piece.getPiecePosition() != square && piece.defendsSquare(square, board)) {
-        defenders++;
-      }
-    }
-
-    return defenders;
   }
 
   /**

@@ -148,6 +148,27 @@ public final class Bishop extends Piece {
   }
 
   /**
+   * Increments the entry of the given array for every square this bishop defends on the given
+   * board.
+   *
+   * @param board The current board.
+   * @param defenderCounts The per square counts to increment, of length {@link
+   *                       BoardUtils#NUM_TILES}.
+   */
+  @Override
+  public void addDefendedSquares(final Board board, final int[] defenderCounts) {
+    final Line[] lines = PRECOMPUTED_CANDIDATES[this.piecePosition];
+    for (final Line line : lines) {
+      for (final int candidateDestinationCoordinate : line.getLineCoordinates()) {
+        defenderCounts[candidateDestinationCoordinate]++;
+        if (board.getPiece(candidateDestinationCoordinate) != null) {
+          break;
+        }
+      }
+    }
+  }
+
+  /**
    * Calculates the positional bonus for this bishop based on its current location.
    * The bonus value is determined by alliance-specific position tables that favor
    * certain squares for optimal bishop placement.

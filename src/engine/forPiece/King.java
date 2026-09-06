@@ -201,6 +201,22 @@ public final class King extends Piece {
   }
 
   /**
+   * Increments the entry of the given array for every square this king defends on the given
+   * board.
+   *
+   * @param board The current board.
+   * @param defenderCounts The per square counts to increment, of length {@link
+   *                       BoardUtils#NUM_TILES}.
+   */
+  @Override
+  public void addDefendedSquares(final Board board, final int[] defenderCounts) {
+    final int[] candidates = PRECOMPUTED_CANDIDATES[this.piecePosition];
+    for (final int currentCandidateOffset : candidates) {
+      defenderCounts[this.piecePosition + currentCandidateOffset]++;
+    }
+  }
+
+  /**
    * Returns the string representation of this king piece.
    *
    * @return The piece type string representation.

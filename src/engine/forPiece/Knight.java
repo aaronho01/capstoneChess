@@ -131,6 +131,22 @@ public final class Knight extends Piece {
   }
 
   /**
+   * Increments the entry of the given array for every square this knight defends on the given
+   * board.
+   *
+   * @param board The current board.
+   * @param defenderCounts The per square counts to increment, of length {@link
+   *                       BoardUtils#NUM_TILES}.
+   */
+  @Override
+  public void addDefendedSquares(final Board board, final int[] defenderCounts) {
+    final int[] candidates = PRECOMPUTED_CANDIDATES[this.piecePosition];
+    for (final int candidateDestinationCoordinate : candidates) {
+      defenderCounts[candidateDestinationCoordinate]++;
+    }
+  }
+
+  /**
    * Calculates the location bonus for the knight based on its position on the board.
    *
    * @param board The current board state.
