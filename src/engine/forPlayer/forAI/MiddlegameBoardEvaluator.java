@@ -53,7 +53,91 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    */
   @Override
   public double evaluate(final Board board) {
-    return (score(board.whitePlayer(), board) - score(board.blackPlayer(), board));
+    final MoveStatistics whiteStatistics = moveStatistics(board.whitePlayer());
+    final MoveStatistics blackStatistics = moveStatistics(board.blackPlayer());
+
+    return (score(board.whitePlayer(), board, whiteStatistics, blackStatistics) -
+            score(board.blackPlayer(), board, blackStatistics, whiteStatistics));
+  }
+
+  /**
+   * The quantities drawn from one player's legal move list that the scoring terms read. The
+   * arrays belong to this record and must not be modified by a caller. The near king quantities
+   * are measured against the king of the player's opponent.
+   *
+   * @param moveCount The number of legal moves the player has.
+   * @param moveCountByPieceType The number of legal moves per moving piece type, indexed by
+   *                             {@link Piece.PieceType#ordinal()}.
+   * @param destinationCount The number of legal moves landing on each tile, indexed by tile.
+   * @param pawnDestinationCount The number of legal pawn moves landing on each tile, indexed by
+   *                             tile.
+   * @param spaceCount The space count accumulated over the move destinations, which counts a
+   *                   destination once for lying in the player's forward half and once for lying
+   *                   in the extended centre.
+   * @param nearKingSquareCount The number of legal moves landing within two tiles of the
+   *                            opposing king.
+   * @param nearKingCountByPieceType The number of legal moves per moving piece type landing
+   *                                 within two tiles of the opposing king, indexed by {@link
+   *                                 Piece.PieceType#ordinal()}.
+   */
+  private record MoveStatistics(int moveCount,
+                                int[] moveCountByPieceType,
+                                int[] destinationCount,
+                                int[] pawnDestinationCount,
+                                int spaceCount,
+                                int nearKingSquareCount,
+                                int[] nearKingCountByPieceType) {
+  }
+
+  /**
+   * Walks the given player's legal move list once and returns the quantities the scoring terms
+   * read from it.
+   *
+   * @param player The player whose legal move list is being read.
+   * @return The statistics of that player's legal move list.
+   */
+  private MoveStatistics moveStatistics(final Player player) {
+    final Collection<Move> playerMoves = player.getLegalMoves();
+    final Alliance alliance = player.getAlliance();
+    final int opposingKingPosition = player.getOpponent().getPlayerKing().getPiecePosition();
+
+    final int[] moveCountByPieceType = new int[Piece.PieceType.values().length];
+    final int[] destinationCount = new int[BoardUtils.NUM_TILES];
+    final int[] pawnDestinationCount = new int[BoardUtils.NUM_TILES];
+    final int[] nearKingCountByPieceType = new int[Piece.PieceType.values().length];
+    int spaceCount = 0;
+    int nearKingSquareCount = 0;
+
+    for (final Move move : playerMoves) {
+      final int destination = move.getDestinationCoordinate();
+      final Piece.PieceType pieceType = move.getMovedPiece().getPieceType();
+
+      moveCountByPieceType[pieceType.ordinal()]++;
+      destinationCount[destination]++;
+
+      if (pieceType == Piece.PieceType.PAWN) {
+        pawnDestinationCount[destination]++;
+      }
+
+      final int rank = destination / 8;
+      final int file = destination % 8;
+
+      if ((alliance.isWhite() && rank < 4) || (!alliance.isWhite() && rank > 3)) {
+        spaceCount++;
+      }
+
+      if (file >= 2 && file <= 5 && rank >= 2 && rank <= 5) {
+        spaceCount++;
+      }
+
+      if (isSquareNearKing(opposingKingPosition, destination)) {
+        nearKingSquareCount++;
+        nearKingCountByPieceType[pieceType.ordinal()]++;
+      }
+    }
+
+    return new MoveStatistics(playerMoves.size(), moveCountByPieceType, destinationCount,
+            pawnDestinationCount, spaceCount, nearKingSquareCount, nearKingCountByPieceType);
   }
 
   /**
@@ -62,20 +146,24 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param player The player for whom the board position is being evaluated.
    * @param board The current state of the chess board.
+   * @param playerStatistics The statistics of the player's legal move list.
+   * @param opponentStatistics The statistics of the opponent's legal move list.
    * @return The evaluation score of the board from the perspective of the specified player.
    */
   @VisibleForTesting
-  private double score(final Player player, final Board board) {
+  private double score(final Player player, final Board board,
+                       final MoveStatistics playerStatistics,
+                       final MoveStatistics opponentStatistics) {
     final List<Piece> playerPawns = getPlayerPawns(player);
     final List<Piece> opponentPawns = getPlayerPawns(player.getOpponent());
 
     return materialEvaluation(player.getActivePieces()) +
-            mobilityEvaluation(player) +
-            kingSafetyEvaluation(player, board, playerPawns) +
+            mobilityEvaluation(playerStatistics) +
+            kingSafetyEvaluation(player, board, playerPawns, opponentStatistics) +
             pawnStructureEvaluation(player, board, playerPawns, opponentPawns) +
-            pieceCoordinationEvaluation(player, board) +
-            spaceControlEvaluation(player) +
-            attackingPotentialEvaluation(player) +
+            pieceCoordinationEvaluation(player, board, opponentStatistics) +
+            spaceControlEvaluation(playerStatistics, opponentStatistics) +
+            attackingPotentialEvaluation(player, playerStatistics) +
             specialPatternsEvaluation(player, board, playerPawns, opponentPawns);
   }
 
@@ -111,36 +199,19 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * knight, bishop, rook and queen. The result is a per-player quantity and the caller forms the
    * difference between the two players.
    *
-   * @param player The player whose mobility is being evaluated.
+   * @param playerStatistics The statistics of the player's legal move list.
    * @return The mobility evaluation score.
    */
-  private double mobilityEvaluation(final Player player) {
-    final Collection<Move> playerMoves = player.getLegalMoves();
+  private double mobilityEvaluation(final MoveStatistics playerStatistics) {
+    final int[] moveCountByPieceType = playerStatistics.moveCountByPieceType();
     double mobilityScore = 0;
 
-    Map<Piece.PieceType, Integer> movesPerPiece = new HashMap<>();
-    for (final Move move : playerMoves) {
-      Piece.PieceType pieceType = move.getMovedPiece().getPieceType();
-      movesPerPiece.put(pieceType, movesPerPiece.getOrDefault(pieceType, 0) + 1);
-    }
+    mobilityScore += moveCountByPieceType[Piece.PieceType.KNIGHT.ordinal()] * 4.5;
+    mobilityScore += moveCountByPieceType[Piece.PieceType.BISHOP.ordinal()] * 5.0;
+    mobilityScore += moveCountByPieceType[Piece.PieceType.ROOK.ordinal()] * 4.0;
+    mobilityScore += moveCountByPieceType[Piece.PieceType.QUEEN.ordinal()] * 2.0;
 
-    if (movesPerPiece.containsKey(Piece.PieceType.KNIGHT)) {
-      mobilityScore += movesPerPiece.get(Piece.PieceType.KNIGHT) * 4.5;
-    }
-
-    if (movesPerPiece.containsKey(Piece.PieceType.BISHOP)) {
-      mobilityScore += movesPerPiece.get(Piece.PieceType.BISHOP) * 5.0;
-    }
-
-    if (movesPerPiece.containsKey(Piece.PieceType.ROOK)) {
-      mobilityScore += movesPerPiece.get(Piece.PieceType.ROOK) * 4.0;
-    }
-
-    if (movesPerPiece.containsKey(Piece.PieceType.QUEEN)) {
-      mobilityScore += movesPerPiece.get(Piece.PieceType.QUEEN) * 2.0;
-    }
-
-    mobilityScore += playerMoves.size() * 5.0;
+    mobilityScore += playerStatistics.moveCount() * 5.0;
 
     return mobilityScore;
   }
@@ -152,10 +223,12 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * @param player The player whose king safety is being evaluated.
    * @param board The current chess board.
    * @param playerPawns The player's pawns.
+   * @param opponentStatistics The statistics of the opponent's legal move list.
    * @return The king safety evaluation score.
    */
   private double kingSafetyEvaluation(final Player player, final Board board,
-                                      final List<Piece> playerPawns) {
+                                      final List<Piece> playerPawns,
+                                      final MoveStatistics opponentStatistics) {
     double kingSafetyScore = 0;
     final King playerKing = player.getPlayerKing();
     final int kingPosition = playerKing.getPiecePosition();
@@ -165,7 +238,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     }
 
     kingSafetyScore += evaluatePawnShield(player, board, kingPosition);
-    kingSafetyScore -= evaluateKingExposure(player, kingPosition);
+    kingSafetyScore -= evaluateKingExposure(player, opponentStatistics);
     kingSafetyScore -= evaluateKingTropism(player, kingPosition);
     kingSafetyScore -= evaluateOpenFilesToKing(player, kingPosition, playerPawns);
 
@@ -263,32 +336,22 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * Evaluates the king's exposure to attacks.
    *
    * @param player The player whose king's exposure is being evaluated.
-   * @param kingPosition The position of the king on the board.
+   * @param opponentStatistics The statistics of the opposing player's legal move list, whose near
+   *                           king quantities are measured against this player's king.
    * @return The king exposure score (higher values indicate more exposure).
    */
-  private double evaluateKingExposure(final Player player, final int kingPosition) {
+  private double evaluateKingExposure(final Player player,
+                                      final MoveStatistics opponentStatistics) {
     double exposureScore = 0;
-    final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
+    final int[] nearKingCount = opponentStatistics.nearKingCountByPieceType();
+    final int attacksNearKing = opponentStatistics.nearKingSquareCount();
 
-    int attacksNearKing = 0;
-
-    for (final Move move : opponentMoves) {
-      final int moveDestination = move.getDestinationCoordinate();
-      if (isSquareNearKing(kingPosition, moveDestination)) {
-        attacksNearKing++;
-
-        if (move.getMovedPiece().getPieceType() == Piece.PieceType.QUEEN) {
-          exposureScore += 10;
-        } else if (move.getMovedPiece().getPieceType() == Piece.PieceType.ROOK) {
-          exposureScore += 7;
-        } else if (move.getMovedPiece().getPieceType() == Piece.PieceType.BISHOP ||
-                move.getMovedPiece().getPieceType() == Piece.PieceType.KNIGHT) {
-          exposureScore += 5;
-        } else {
-          exposureScore += 2;
-        }
-      }
-    }
+    exposureScore += nearKingCount[Piece.PieceType.QUEEN.ordinal()] * 10;
+    exposureScore += nearKingCount[Piece.PieceType.ROOK.ordinal()] * 7;
+    exposureScore += nearKingCount[Piece.PieceType.BISHOP.ordinal()] * 5;
+    exposureScore += nearKingCount[Piece.PieceType.KNIGHT.ordinal()] * 5;
+    exposureScore += nearKingCount[Piece.PieceType.PAWN.ordinal()] * 2;
+    exposureScore += nearKingCount[Piece.PieceType.KING.ordinal()] * 2;
 
     if (attacksNearKing > 2) {
       exposureScore += (attacksNearKing - 2) * 15;
@@ -930,15 +993,17 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param player The player whose piece coordination is being evaluated.
    * @param board The current chess board.
+   * @param opponentStatistics The statistics of the opponent's legal move list.
    * @return The piece coordination evaluation score.
    */
-  private double pieceCoordinationEvaluation(final Player player, final Board board) {
+  private double pieceCoordinationEvaluation(final Player player, final Board board,
+                                             final MoveStatistics opponentStatistics) {
     double coordinationScore = 0;
     final Collection<Piece> playerPieces = player.getActivePieces();
 
     coordinationScore += evaluateBishopPair(playerPieces);
     coordinationScore += evaluateRookCoordination(playerPieces, board);
-    coordinationScore += evaluatePieceProtection(playerPieces, board, player.getOpponent());
+    coordinationScore += evaluatePieceProtection(playerPieces, board, opponentStatistics);
     coordinationScore += evaluatePieceActivity(playerPieces);
 
     return coordinationScore;
@@ -1126,28 +1191,20 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param playerPieces The player's pieces.
    * @param board The current chess board state.
-   * @param opponent The opposing player.
+   * @param opponentStatistics The statistics of the opposing player's legal move list.
    * @return The enhanced piece protection evaluation score.
    */
   private double evaluatePieceProtection(final Collection<Piece> playerPieces,
                                          final Board board,
-                                         final Player opponent) {
+                                         final MoveStatistics opponentStatistics) {
     double protectionScore = 0;
 
-    int[] squareAttackCount = new int[BoardUtils.NUM_TILES];
-    int[] squarePawnAttackCount = new int[BoardUtils.NUM_TILES];
-    int[] defenderCount = new int[BoardUtils.NUM_TILES];
+    final int[] squareAttackCount = opponentStatistics.destinationCount();
+    final int[] squarePawnAttackCount = opponentStatistics.pawnDestinationCount();
+    final int[] defenderCount = new int[BoardUtils.NUM_TILES];
 
     for (final Piece piece : playerPieces) {
       piece.addDefendedSquares(board, defenderCount);
-    }
-
-    for (final Move move : opponent.getLegalMoves()) {
-      final int destination = move.getDestinationCoordinate();
-      squareAttackCount[destination]++;
-      if (move.getMovedPiece().getPieceType() == Piece.PieceType.PAWN) {
-        squarePawnAttackCount[destination]++;
-      }
     }
 
     for (final Piece piece : playerPieces) {
@@ -1236,36 +1293,17 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * opponent. Every term but the clamped move advantage is a per-player quantity and the caller
    * forms the difference between the two players.
    *
-   * @param player The player whose space control is being evaluated.
+   * @param playerStatistics The statistics of the player's legal move list.
+   * @param opponentStatistics The statistics of the opponent's legal move list.
    * @return The space control evaluation score.
    */
-  private double spaceControlEvaluation(final Player player) {
+  private double spaceControlEvaluation(final MoveStatistics playerStatistics,
+                                        final MoveStatistics opponentStatistics) {
     double spaceScore = 0;
-    final Collection<Move> playerMoves = player.getLegalMoves();
-    final Collection<Move> opponentMoves = player.getOpponent().getLegalMoves();
-    final Alliance alliance = player.getAlliance();
+    final int[] controlledSquares = playerStatistics.destinationCount();
 
-    int spacePiecesControl = 0;
-    int[] controlledSquares = new int[BoardUtils.NUM_TILES];
-
-    for (final Move move : playerMoves) {
-      final int destination = move.getDestinationCoordinate();
-      controlledSquares[destination]++;
-
-      final int rank = destination / 8;
-      final int file = destination % 8;
-
-      if ((alliance.isWhite() && rank < 4) || (!alliance.isWhite() && rank > 3)) {
-        spacePiecesControl++;
-      }
-
-      if (file >= 2 && file <= 5 && rank >= 2 && rank <= 5) {
-        spacePiecesControl++;
-      }
-    }
-
-    spaceScore += spacePiecesControl * 1.0;
-    final int moveAdvantage = playerMoves.size() - opponentMoves.size();
+    spaceScore += playerStatistics.spaceCount() * 1.0;
+    final int moveAdvantage = playerStatistics.moveCount() - opponentStatistics.moveCount();
     spaceScore += Math.max(-10, Math.min(moveAdvantage, 10)) * 3;
 
     final int[] keySquares = {27, 28, 35, 36};
@@ -1280,64 +1318,30 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * Evaluates the attacking potential against the opponent's king.
    *
    * @param player The player whose attacking potential is being evaluated.
+   * @param playerStatistics The statistics of the player's legal move list.
    * @return The attacking potential evaluation score.
    */
-  private double attackingPotentialEvaluation(final Player player) {
+  private double attackingPotentialEvaluation(final Player player,
+                                              final MoveStatistics playerStatistics) {
     double attackScore = 0;
-    final Collection<Move> playerMoves = player.getLegalMoves();
     final King opponentKing = player.getOpponent().getPlayerKing();
     final int kingPosition = opponentKing.getPiecePosition();
+    final int[] nearKingCount = playerStatistics.nearKingCountByPieceType();
+
+    final int attackingSquaresCount = playerStatistics.nearKingSquareCount();
+
+    final boolean queenAttacking = nearKingCount[Piece.PieceType.QUEEN.ordinal()] > 0;
+    final boolean rookAttacking = nearKingCount[Piece.PieceType.ROOK.ordinal()] > 0;
+    final boolean bishopAttacking = nearKingCount[Piece.PieceType.BISHOP.ordinal()] > 0;
+    final boolean knightAttacking = nearKingCount[Piece.PieceType.KNIGHT.ordinal()] > 0;
+    final boolean pawnAttacking = nearKingCount[Piece.PieceType.PAWN.ordinal()] > 0;
 
     int attackingPiecesCount = 0;
-    int attackingSquaresCount = 0;
-
-    boolean queenAttacking = false;
-    boolean rookAttacking = false;
-    boolean bishopAttacking = false;
-    boolean knightAttacking = false;
-    boolean pawnAttacking = false;
-
-    for (final Move move : playerMoves) {
-      final int destination = move.getDestinationCoordinate();
-      final Piece piece = move.getMovedPiece();
-
-      if (isSquareNearKing(kingPosition, destination)) {
-        attackingSquaresCount++;
-
-        switch (piece.getPieceType()) {
-          case QUEEN:
-            if (!queenAttacking) {
-              attackingPiecesCount++;
-              queenAttacking = true;
-            }
-            break;
-          case ROOK:
-            if (!rookAttacking) {
-              attackingPiecesCount++;
-              rookAttacking = true;
-            }
-            break;
-          case BISHOP:
-            if (!bishopAttacking) {
-              attackingPiecesCount++;
-              bishopAttacking = true;
-            }
-            break;
-          case KNIGHT:
-            if (!knightAttacking) {
-              attackingPiecesCount++;
-              knightAttacking = true;
-            }
-            break;
-          case PAWN:
-            if (!pawnAttacking) {
-              attackingPiecesCount++;
-              pawnAttacking = true;
-            }
-            break;
-        }
-      }
-    }
+    if (queenAttacking) attackingPiecesCount++;
+    if (rookAttacking) attackingPiecesCount++;
+    if (bishopAttacking) attackingPiecesCount++;
+    if (knightAttacking) attackingPiecesCount++;
+    if (pawnAttacking) attackingPiecesCount++;
 
     if (attackingPiecesCount >= 2) {
       attackScore += 20 * attackingPiecesCount;
