@@ -198,6 +198,7 @@ public class TacticalSuite {
     }
 
     int solved = 0;
+    long totalNodes = 0;
     final long startTime = System.nanoTime();
     if (!verbose) {
       System.setOut(new PrintStream(OutputStream.nullOutputStream()));
@@ -210,6 +211,7 @@ public class TacticalSuite {
       for (int index = 0; index < STANDARD_POSITIONS.size(); index++) {
         final PositionOutcome outcome = await(outcomes.get(index), STANDARD_POSITIONS.get(index));
         originalOut.print(outcome.report());
+        totalNodes += outcome.nodes();
         if (outcome.solved()) {
           solved++;
         }
@@ -220,8 +222,8 @@ public class TacticalSuite {
     }
 
     final double elapsedSeconds = (System.nanoTime() - startTime) / NANOSECONDS_PER_SECOND;
-    System.out.printf("%d of %d positions solved in %.2fs%n",
-            solved, STANDARD_POSITIONS.size(), elapsedSeconds);
+    System.out.printf("%d of %d positions solved, %d nodes in %.2fs%n",
+            solved, STANDARD_POSITIONS.size(), totalNodes, elapsedSeconds);
     return solved == STANDARD_POSITIONS.size();
   }
 
@@ -273,7 +275,7 @@ public class TacticalSuite {
    * @return A failed outcome carrying a report of the reason.
    */
   private static PositionOutcome abandoned(final TacticalPosition position, final String reason) {
-    return new PositionOutcome(false, String.format("%s%n  %s%n  FAIL  %s%n%n",
+    return new PositionOutcome(false, 0, String.format("%s%n  %s%n  FAIL  %s%n%n",
             position.name(), position.fen(), reason));
   }
 
@@ -300,11 +302,14 @@ public class TacticalSuite {
     final double elapsedSeconds = (System.nanoTime() - startTime) / NANOSECONDS_PER_SECOND;
     final String chosenNotation = describe(board, outcome.move());
     final boolean solved = position.accepts(chosenNotation);
-    final String report = String.format("%s%n  %s%n  depth %d  expected %-14s chose %-14s %10.0f %8.2fs  %s%n%n",
+    final double nodesPerSecond = elapsedSeconds > 0 ? outcome.nodes() / elapsedSeconds : 0;
+    final String report = String.format(
+            "%s%n  %s%n  depth %d  expected %-14s chose %-14s %10.0f  %s%n"
+                    + "  %14d nodes  %12.0f nodes/s  %8.2fs%n%n",
             position.name(), position.fen(), depth,
             String.join(" or ", position.acceptedMoves()), chosenNotation, outcome.score(),
-            elapsedSeconds, solved ? "PASS" : "FAIL");
-    return new PositionOutcome(solved, report);
+            solved ? "PASS" : "FAIL", outcome.nodes(), nodesPerSecond, elapsedSeconds);
+    return new PositionOutcome(solved, outcome.nodes(), report);
   }
 
   /**
@@ -314,25 +319,26 @@ public class TacticalSuite {
    *
    * @param board The position to search.
    * @param depth The depth to search to.
-   * @return The move the engine chose.
+   * @return The outcome of the search.
    */
   private static SearchOutcome search(final Board board, final int depth) {
     final AlphaBeta engine = new AlphaBeta(depth, TABLE_SIZE_MB, SEARCH_THREADS);
     try {
       final Move move = engine.execute(board, depth);
-      return new SearchOutcome(move, engine.getLastScore());
+      return new SearchOutcome(move, engine.getLastScore(), engine.getBoardsEvaluated());
     } finally {
       engine.shutdown();
     }
   }
 
   /**
-   * The move a search chose and the score it was given.
+   * The move a search chose, the score it was given, and the size of the tree it took to find it.
    *
    * @param move The move the engine chose.
    * @param score The root score of that move.
+   * @param nodes The number of positions the search evaluated.
    */
-  private record SearchOutcome(Move move, double score) {
+  private record SearchOutcome(Move move, double score, long nodes) {
   }
 
   /**
@@ -382,9 +388,10 @@ public class TacticalSuite {
    * for it.
    *
    * @param solved Whether the engine chose a move the position accepts.
+   * @param nodes The number of positions the search evaluated.
    * @param report The text describing the position and the move that was chosen.
    */
-  private record PositionOutcome(boolean solved, String report) { }
+  private record PositionOutcome(boolean solved, long nodes, String report) { }
 
   /**
    * The TacticalPosition record pairs a position with the moves that solve it and the depth to

@@ -675,6 +675,16 @@ public class AlphaBeta extends Observable implements MoveStrategy {
   }
 
   /**
+   * Returns the number of positions the most recent search evaluated, counting every thread that
+   * took part in it. The count is reset at the start of each search.
+   *
+   * @return The number of positions the last search evaluated.
+   */
+  public long getBoardsEvaluated() {
+    return this.boardsEvaluated.get();
+  }
+
+  /**
    * Retrieves a cached board evaluation or computes a new evaluation if not found in cache.
    *
    * @param board The board position to evaluate.
