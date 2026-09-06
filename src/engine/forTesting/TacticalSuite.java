@@ -21,9 +21,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * The TacticalSuite class runs the engine's search against positions whose winning move is known
- * and reports whether the engine chose it. This tests the evaluation, move ordering, and pruning
- * layers that a perft cannot reach, since a perft counts nodes and is blind to which move is picked.
+ * The TacticalSuite class runs the engine's search against positions whose winning move and
+ * expected score are known and reports whether the engine produced both. This tests the
+ * evaluation, move ordering, and pruning layers that a perft cannot reach, since a perft counts
+ * nodes and is blind to which move is picked. A position is solved only when the engine both
+ * chooses an accepted move and returns a score the position accepts, so a search that finds the
+ * mate but reports the wrong distance to it fails.
  * <p>
  * Each position is searched to a fixed depth rather than for a fixed time, so a run does not depend
  * on how fast the host is. Every position is searched by a freshly constructed engine that is shut
@@ -102,35 +105,50 @@ public class TacticalSuite {
    */
   private static final List<TacticalPosition> STANDARD_POSITIONS = List.of(
           new TacticalPosition("Back rank mate", Category.MATE,
-                  "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1", 2, "a1a8"),
+                  "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1",
+                  2, ScoreBand.mateIn(1), "a1a8"),
           new TacticalPosition("Back rank mate by capture", Category.MATE,
-                  "2r3k1/5ppp/8/8/8/8/5PPP/2R3K1 w - - 0 1", 2, "c1c8"),
+                  "2r3k1/5ppp/8/8/8/8/5PPP/2R3K1 w - - 0 1",
+                  2, ScoreBand.mateIn(1), "c1c8"),
           new TacticalPosition("Scholar's mate", Category.MATE,
-                  "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4", 2, "h5f7"),
+                  "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4",
+                  2, ScoreBand.mateIn(1), "h5f7"),
           new TacticalPosition("Queen sacrifice, mate in two", Category.MATE,
-                  "2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - - 0 1", 4, "g3g6"),
+                  "2rr3k/pp3pp1/1nnqbN1p/3pN3/2pP4/2P3Q1/PPB4P/R4RK1 w - - 0 1",
+                  4, ScoreBand.mateIn(2), "g3g6"),
           new TacticalPosition("Bishop sacrifice, mate in two", Category.MATE,
-                  "r1bq2rk/pp3pbp/2p1p1pQ/7P/3P4/2PB1N2/PP3PPR/2KR4 w - - 0 1", 4, "h6h7"),
+                  "r1bq2rk/pp3pbp/2p1p1pQ/7P/3P4/2PB1N2/PP3PPR/2KR4 w - - 0 1",
+                  4, ScoreBand.mateIn(2), "h6h7"),
           new TacticalPosition("Queen check, mate in two", Category.MATE,
-                  "5k2/6pp/p1qN4/1p1p4/3P4/2PKP2Q/PP3r2/3R4 b - - 0 1", 4, "c6c4"),
+                  "5k2/6pp/p1qN4/1p1p4/3P4/2PKP2Q/PP3r2/3R4 b - - 0 1",
+                  4, ScoreBand.mateIn(2), "c6c4"),
           new TacticalPosition("Rook deflection, mate in two", Category.MATE,
-                  "6k1/pp4p1/2p5/2bp4/8/P5Pb/1P3rrP/2BRRN1K b - - 0 1", 4, "g2g1"),
+                  "6k1/pp4p1/2p5/2bp4/8/P5Pb/1P3rrP/2BRRN1K b - - 0 1",
+                  4, ScoreBand.mateIn(2), "g2g1"),
           new TacticalPosition("Rook lift wins the queen", Category.MATERIAL,
-                  "5rk1/1ppb3p/p1pb4/6q1/3P1p1r/2P1R2P/PP1BQ1P1/5RKN w - - 0 1", 6, "e3g3"),
+                  "5rk1/1ppb3p/p1pb4/6q1/3P1p1r/2P1R2P/PP1BQ1P1/5RKN w - - 0 1",
+                  6, ScoreBand.atLeast(300), "e3g3"),
           new TacticalPosition("Rook sacrifice wins the knight", Category.MATERIAL,
-                  "2br2k1/2q3rn/p2NppQ1/2p1P3/Pp5R/4P3/1P3PPP/3R2K1 w - - 0 1", 6, "h4h7"),
+                  "2br2k1/2q3rn/p2NppQ1/2p1P3/Pp5R/4P3/1P3PPP/3R2K1 w - - 0 1",
+                  6, ScoreBand.atLeast(150), "h4h7"),
           new TacticalPosition("Bishop capture wins a piece", Category.MATERIAL,
-                  "r1b1kb1r/3q1ppp/pBp1pn2/8/Np3P2/5B2/PPP3PP/R2Q1RK1 w kq - 0 1", 6, "f3c6"),
+                  "r1b1kb1r/3q1ppp/pBp1pn2/8/Np3P2/5B2/PPP3PP/R2Q1RK1 w kq - 0 1",
+                  6, ScoreBand.atLeast(150), "f3c6"),
           new TacticalPosition("Back rank threat wins the queen", Category.MATERIAL,
-                  "3r1r1k/1p4pp/p4p2/8/1PQR4/6Pq/P3PP2/2R3K1 b - - 0 1", 6, "d8c8"),
+                  "3r1r1k/1p4pp/p4p2/8/1PQR4/6Pq/P3PP2/2R3K1 b - - 0 1",
+                  6, ScoreBand.atLeast(300), "d8c8"),
           new TacticalPosition("Knight fork wins the exchange", Category.MATERIAL,
-                  "8/p7/1ppk1n2/5ppp/P1PP4/2P1K1P1/5N1P/8 b - - 0 1", 6, "f6g4"),
+                  "8/p7/1ppk1n2/5ppp/P1PP4/2P1K1P1/5N1P/8 b - - 0 1",
+                  6, ScoreBand.atLeast(100), "f6g4"),
           new TacticalPosition("Queen sacrifice, mate in four", Category.MATE,
-                  "r2rb1k1/pp1q1p1p/2n1p1p1/2bp4/5P2/PP1BPR1Q/1BPN2PP/R5K1 w - - 0 1", 8, "h3h7"),
+                  "r2rb1k1/pp1q1p1p/2n1p1p1/2bp4/5P2/PP1BPR1Q/1BPN2PP/R5K1 w - - 0 1",
+                  8, ScoreBand.mateIn(4), "h3h7"),
           new TacticalPosition("Smothered mate in four", Category.MATE,
-                  "5r1k/6pp/8/6N1/8/1Q6/6PP/6K1 w - - 0 1", 8, "g5f7"),
+                  "5r1k/6pp/8/6N1/8/1Q6/6PP/6K1 w - - 0 1",
+                  8, ScoreBand.mateIn(4), "g5f7"),
           new TacticalPosition("Knight check, mate in four", Category.MATE,
-                  "rnbqkb1r/pppp1ppp/8/4P3/6n1/7P/PPPNPnP1/R1BQKBNR b KQkq - 0 1", 8, "f2d3"));
+                  "rnbqkb1r/pppp1ppp/8/4P3/6n1/7P/PPPNPnP1/R1BQKBNR b KQkq - 0 1",
+                  8, ScoreBand.mateIn(4), "f2d3"));
 
   /**
    * Runs the suite from the command line. With no arguments every position is searched to its own
@@ -391,8 +409,10 @@ public class TacticalSuite {
 
   /**
    * Searches a single position and builds a report of whether the engine chose a move the position
-   * accepts. Nothing is printed from here, so that reports can be shown in the order the positions
-   * are listed in rather than the order the workers finish in.
+   * accepts and returned a score the position accepts. The score is reported from the point of
+   * view of the side to move rather than from White's. Nothing is printed from here, so that
+   * reports can be shown in the order the positions are listed in rather than the order the
+   * workers finish in.
    *
    * @param position The position to search.
    * @param depthOverride The depth to search to, or zero to use the position's recorded depth.
@@ -407,18 +427,26 @@ public class TacticalSuite {
     } catch (final IllegalArgumentException exception) {
       return abandoned(position, "the position could not be parsed: " + exception.getMessage());
     }
+    final boolean whiteToMove = board.currentPlayer().getAlliance().isWhite();
     final long startTime = System.nanoTime();
     final SearchOutcome outcome = search(board, depth);
     final double elapsedSeconds = (System.nanoTime() - startTime) / NANOSECONDS_PER_SECOND;
     final String chosenNotation = describe(board, outcome.move());
-    final boolean solved = position.accepts(chosenNotation);
+    final double sideToMoveScore = whiteToMove ? outcome.score() : -outcome.score();
+    final boolean moveAccepted = position.accepts(chosenNotation);
+    final boolean scoreAccepted = position.expectedScore().contains(sideToMoveScore);
+    final boolean solved = moveAccepted && scoreAccepted;
     final double nodesPerSecond = elapsedSeconds > 0 ? outcome.nodes() / elapsedSeconds : 0;
     final String report = String.format(
-            "%s%n  %s%n  depth %d  expected %-14s chose %-14s %10.0f  %s%n"
+            "%s%n  %s%n  depth %d  expected %-14s chose %-14s  MOVE %s%n"
+                    + "  score %12.0f  expected %-16s  SCORE %s%n"
                     + "  %14d nodes  %12.0f nodes/s  %8.2fs%n%n",
             position.name(), position.fen(), depth,
-            String.join(" or ", position.acceptedMoves()), chosenNotation, outcome.score(),
-            solved ? "PASS" : "FAIL", outcome.nodes(), nodesPerSecond, elapsedSeconds);
+            String.join(" or ", position.acceptedMoves()), chosenNotation,
+            moveAccepted ? "PASS" : "FAIL",
+            sideToMoveScore, position.expectedScore().description(),
+            scoreAccepted ? "PASS" : "FAIL",
+            outcome.nodes(), nodesPerSecond, elapsedSeconds);
     return new PositionOutcome(solved, outcome.nodes(), report);
   }
 
@@ -485,6 +513,10 @@ public class TacticalSuite {
             recorded at a depth that keeps the tactic inside the search horizon with a margin, so
             overriding downwards is expected to fail some of them.
 
+            A position is solved only when the engine both chooses an accepted move and returns a
+            score inside the range recorded against the position, so a mate found at the wrong
+            distance is a failure.
+
             The category flag restricts the run to the named categories, given in any case and
             separated by commas. The categories are mate and material. Positions are reported
             grouped by category whether or not the flag is given.
@@ -501,11 +533,56 @@ public class TacticalSuite {
    * The PositionOutcome record pairs the result of a position's search with the report to print
    * for it.
    *
-   * @param solved Whether the engine chose a move the position accepts.
+   * @param solved Whether the engine chose a move and returned a score the position accepts.
    * @param nodes The number of positions the search evaluated.
    * @param report The text describing the position and the move that was chosen.
    */
   private record PositionOutcome(boolean solved, long nodes, String report) { }
+
+  /**
+   * The ScoreBand record holds the range of root scores a position accepts, from the point of view
+   * of the side to move rather than from White's.
+   *
+   * @param minimum The lowest score the position accepts.
+   * @param maximum The highest score the position accepts.
+   * @param description The text naming this range in the report.
+   */
+  public record ScoreBand(double minimum, double maximum, String description) {
+
+    /**
+     * Returns the band accepting only a checkmate delivered by the side to move in exactly the
+     * given number of moves. Such a mate leaves the mated side to move at ply two times the move
+     * count less one, and the search scores it {@link AlphaBeta#MATE_VALUE} reduced by that ply.
+     *
+     * @param moves The number of moves to the mate.
+     * @return The band accepting that mate and nothing else.
+     */
+    public static ScoreBand mateIn(final int moves) {
+      final double score = AlphaBeta.MATE_VALUE - (2 * moves - 1);
+      return new ScoreBand(score, score, "mate in " + moves);
+    }
+
+    /**
+     * Returns the band accepting any score at or above the given advantage, up to and including a
+     * checkmate score.
+     *
+     * @param advantage The lowest score the position accepts.
+     * @return The band accepting that advantage or better.
+     */
+    public static ScoreBand atLeast(final double advantage) {
+      return new ScoreBand(advantage, AlphaBeta.MATE_VALUE, "at least " + (long) advantage);
+    }
+
+    /**
+     * Reports whether the given score falls inside this band.
+     *
+     * @param score The root score, from the point of view of the side to move.
+     * @return True if the score is inside this band, false otherwise.
+     */
+    public boolean contains(final double score) {
+      return score >= this.minimum && score <= this.maximum;
+    }
+  }
 
   /**
    * The TacticalPosition record pairs a position with the moves that solve it and the depth to
@@ -516,10 +593,12 @@ public class TacticalSuite {
    * @param category The kind of position this is, which the report is grouped by.
    * @param fen The Forsyth-Edwards Notation string describing the position.
    * @param searchDepth The depth this position is searched to when no override is given.
+   * @param expectedScore The root scores this position accepts, from the point of view of the
+   *        side to move.
    * @param acceptedMoves The winning moves, in long algebraic notation.
    */
   public record TacticalPosition(String name, Category category, String fen, int searchDepth,
-                                 List<String> acceptedMoves) {
+                                 ScoreBand expectedScore, List<String> acceptedMoves) {
 
     /**
      * Constructs a position whose accepted moves are given one after another.
@@ -528,11 +607,14 @@ public class TacticalSuite {
      * @param category The kind of position this is, which the report is grouped by.
      * @param fen The Forsyth-Edwards Notation string describing the position.
      * @param searchDepth The depth this position is searched to when no override is given.
+     * @param expectedScore The root scores this position accepts, from the point of view of the
+     *        side to move.
      * @param acceptedMoves The winning moves, in long algebraic notation.
      */
     public TacticalPosition(final String name, final Category category, final String fen,
-                            final int searchDepth, final String... acceptedMoves) {
-      this(name, category, fen, searchDepth, List.of(acceptedMoves));
+                            final int searchDepth, final ScoreBand expectedScore,
+                            final String... acceptedMoves) {
+      this(name, category, fen, searchDepth, expectedScore, List.of(acceptedMoves));
     }
 
     /**
