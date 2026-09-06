@@ -66,14 +66,17 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    */
   @VisibleForTesting
   private double score(final Player player, final Board board) {
+    final List<Piece> playerPawns = getPlayerPawns(player);
+    final List<Piece> opponentPawns = getPlayerPawns(player.getOpponent());
+
     return materialEvaluation(player.getActivePieces()) +
             mobilityEvaluation(player) +
-            kingSafetyEvaluation(player, board) +
-            pawnStructureEvaluation(player, board) +
+            kingSafetyEvaluation(player, board, playerPawns) +
+            pawnStructureEvaluation(player, board, playerPawns, opponentPawns) +
             pieceCoordinationEvaluation(player, board) +
             spaceControlEvaluation(player) +
             attackingPotentialEvaluation(player) +
-            specialPatternsEvaluation(player, board);
+            specialPatternsEvaluation(player, board, playerPawns, opponentPawns);
   }
 
   /**
@@ -148,9 +151,11 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param player The player whose king safety is being evaluated.
    * @param board The current chess board.
+   * @param playerPawns The player's pawns.
    * @return The king safety evaluation score.
    */
-  private double kingSafetyEvaluation(final Player player, final Board board) {
+  private double kingSafetyEvaluation(final Player player, final Board board,
+                                      final List<Piece> playerPawns) {
     double kingSafetyScore = 0;
     final King playerKing = player.getPlayerKing();
     final int kingPosition = playerKing.getPiecePosition();
@@ -162,7 +167,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     kingSafetyScore += evaluatePawnShield(player, board, kingPosition);
     kingSafetyScore -= evaluateKingExposure(player, kingPosition);
     kingSafetyScore -= evaluateKingTropism(player, kingPosition);
-    kingSafetyScore -= evaluateOpenFilesToKing(player, kingPosition);
+    kingSafetyScore -= evaluateOpenFilesToKing(player, kingPosition, playerPawns);
 
     return kingSafetyScore;
   }
@@ -362,12 +367,13 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param player The player whose king is being evaluated for open file exposure.
    * @param kingPosition The position of the king on the board.
+   * @param playerPawns The player's pawns.
    * @return The open files evaluation score (higher values indicate more exposure).
    */
-  private double evaluateOpenFilesToKing(final Player player, final int kingPosition) {
+  private double evaluateOpenFilesToKing(final Player player, final int kingPosition,
+                                         final List<Piece> playerPawns) {
     double openFileScore = 0;
     final int kingFile = kingPosition % 8;
-    final List<Piece> playerPawns = getPlayerPawns(player);
 
     if (isPawnOnFile(kingFile, playerPawns)) {
       openFileScore += 25;
@@ -432,12 +438,14 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param player The player whose pawn structure is being evaluated.
    * @param board The current state of the chess board.
+   * @param playerPawns The player's pawns.
+   * @param opponentPawns The opponent's pawns.
    * @return The pawn structure evaluation score.
    */
-  private double pawnStructureEvaluation(final Player player, final Board board) {
+  private double pawnStructureEvaluation(final Player player, final Board board,
+                                         final List<Piece> playerPawns,
+                                         final List<Piece> opponentPawns) {
     final Player opponent = player.getOpponent();
-    final List<Piece> playerPawns = getPlayerPawns(player);
-    final List<Piece> opponentPawns = getPlayerPawns(opponent);
     double pawnStructureScore = 0;
 
     pawnStructureScore += evaluatePassedPawns(playerPawns, opponentPawns,
@@ -1408,17 +1416,21 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *
    * @param player The player whose special patterns are being evaluated.
    * @param board The current chess board.
+   * @param playerPawns The player's pawns.
+   * @param opponentPawns The opponent's pawns.
    * @return The special patterns evaluation score.
    */
-  private double specialPatternsEvaluation(final Player player, final Board board) {
+  private double specialPatternsEvaluation(final Player player, final Board board,
+                                           final List<Piece> playerPawns,
+                                           final List<Piece> opponentPawns) {
     double patternScore = 0;
     final Collection<Piece> playerPieces = player.getActivePieces();
     final Alliance alliance = player.getAlliance();
 
     patternScore += evaluateRooksOn7thRank(playerPieces, board, alliance);
     patternScore += evaluateFianchetto(playerPieces, alliance);
-    patternScore += evaluateBadBishops(playerPieces, getPlayerPawns(player));
-    patternScore += evaluateKnightOutposts(playerPieces, getPlayerPawns(player), getPlayerPawns(player.getOpponent()));
+    patternScore += evaluateBadBishops(playerPieces, playerPawns);
+    patternScore += evaluateKnightOutposts(playerPieces, playerPawns, opponentPawns);
     patternScore += evaluateQueenPositioning(playerPieces, board, alliance);
 
     return patternScore;
