@@ -369,7 +369,7 @@ public class TacticalSuite {
             recorded at a depth that keeps the tactic inside the search horizon with a margin, so
             overriding downwards is expected to fail some of them.
 
-            The workers flag sets how many positions are searched at once, four by default. Every
+            The workers flag sets how many positions are searched at once, one by default. Every
             worker holds a transposition table for as long as its position is running, so raising
             it raises peak memory in proportion. A verbose run uses one worker whatever is asked
             for, so that the engine's own output stays readable.
