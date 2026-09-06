@@ -28,6 +28,9 @@ import java.util.concurrent.Future;
  * chooses an accepted move and returns a score the position accepts, so a search that finds the
  * mate but reports the wrong distance to it fails.
  * <p>
+ * A position may record moves to replay onto the board before the search begins, which is how a
+ * position whose result depends on the moves that preceded it, such as a repetition, is expressed.
+ * <p>
  * Each position is searched to a fixed depth rather than for a fixed time, so a run does not depend
  * on how fast the host is. Every position is searched by a freshly constructed engine that is shut
  * down once the position is finished, because the transposition table, evaluation cache, history
@@ -96,7 +99,7 @@ public class TacticalSuite {
     /** A position in which the side to move wins material without forcing checkmate. */
     MATERIAL,
 
-    /** A position in which the side to move is held to a draw by the fifty-move rule. */
+    /** A position in which the side to move is held to a draw, or holds one, by rule. */
     DRAW
   }
 
@@ -158,7 +161,15 @@ public class TacticalSuite {
                   6, ScoreBand.drawn(), "a8a7", "a8b7", "a8b8"),
           new TacticalPosition("Capture resets the fifty-move clock", Category.DRAW,
                   "7k/8/8/8/1p6/1Q6/8/K7 w - - 99 60",
-                  6, ScoreBand.atLeast(300), "b3b4"));
+                  6, ScoreBand.atLeast(300), "b3b4"),
+          new TacticalPosition("Repetition saves a lost position", Category.DRAW,
+                  "6k1/7r/8/8/8/8/1Q6/K1R5 b - - 0 1",
+                  List.of("h7h6", "a1a2", "h6h7", "a2a1"),
+                  6, ScoreBand.drawn(), "h7h6"),
+          new TacticalPosition("Repetition saves a lost position, colours reversed", Category.DRAW,
+                  "k1r5/1q6/8/8/8/8/7R/6K1 w - - 0 1",
+                  List.of("h2h3", "a8a7", "h3h2", "a7a8"),
+                  6, ScoreBand.drawn(), "h2h3"));
 
   /**
    * Runs the suite from the command line. With no arguments every position is searched to its own
@@ -419,7 +430,8 @@ public class TacticalSuite {
 
   /**
    * Searches a single position and builds a report of whether the engine chose a move the position
-   * accepts and returned a score the position accepts. The score is reported from the point of
+   * accepts and returned a score the position accepts. Any moves the position records are replayed
+   * onto the board before the search, so that the search sees the history they leave behind. The score is reported from the point of
    * view of the side to move rather than from White's. Nothing is printed from here, so that
    * reports can be shown in the order the positions are listed in rather than the order the
    * workers finish in.
@@ -437,6 +449,13 @@ public class TacticalSuite {
     } catch (final IllegalArgumentException exception) {
       return abandoned(position, "the position could not be parsed: " + exception.getMessage());
     }
+    for (final String notation : position.setupMoves()) {
+      final Move setupMove = OpeningBook.resolve(board, notation);
+      if (setupMove == null) {
+        return abandoned(position, "the setup move " + notation + " is not legal");
+      }
+      board.makeMove(setupMove);
+    }
     final boolean whiteToMove = board.currentPlayer().getAlliance().isWhite();
     final long startTime = System.nanoTime();
     final SearchOutcome outcome = search(board, depth);
@@ -447,11 +466,13 @@ public class TacticalSuite {
     final boolean scoreAccepted = position.expectedScore().contains(sideToMoveScore);
     final boolean solved = moveAccepted && scoreAccepted;
     final double nodesPerSecond = elapsedSeconds > 0 ? outcome.nodes() / elapsedSeconds : 0;
+    final String setup = position.setupMoves().isEmpty() ? "" :
+            String.format("  setup %s%n", String.join(" ", position.setupMoves()));
     final String report = String.format(
-            "%s%n  %s%n  depth %d  expected %-14s chose %-14s  MOVE %s%n"
+            "%s%n  %s%n%s  depth %d  expected %-14s chose %-14s  MOVE %s%n"
                     + "  score %12.0f  expected %-16s  SCORE %s%n"
                     + "  %14d nodes  %12.0f nodes/s  %8.2fs%n%n",
-            position.name(), position.fen(), depth,
+            position.name(), position.fen(), setup, depth,
             String.join(" or ", position.acceptedMoves()), chosenNotation,
             moveAccepted ? "PASS" : "FAIL",
             sideToMoveScore, position.expectedScore().description(),
@@ -611,16 +632,20 @@ public class TacticalSuite {
    * @param name The tactic the position illustrates.
    * @param category The kind of position this is, which the report is grouped by.
    * @param fen The Forsyth-Edwards Notation string describing the position.
+   * @param setupMoves The moves replayed onto the position before the search, in long algebraic
+   *        notation, which may be empty.
    * @param searchDepth The depth this position is searched to when no override is given.
    * @param expectedScore The root scores this position accepts, from the point of view of the
    *        side to move.
    * @param acceptedMoves The winning moves, in long algebraic notation.
    */
-  public record TacticalPosition(String name, Category category, String fen, int searchDepth,
+  public record TacticalPosition(String name, Category category, String fen,
+                                 List<String> setupMoves, int searchDepth,
                                  ScoreBand expectedScore, List<String> acceptedMoves) {
 
     /**
-     * Constructs a position whose accepted moves are given one after another.
+     * Constructs a position with no moves to replay, whose accepted moves are given one after
+     * another.
      *
      * @param name The tactic the position illustrates.
      * @param category The kind of position this is, which the report is grouped by.
@@ -633,7 +658,27 @@ public class TacticalSuite {
     public TacticalPosition(final String name, final Category category, final String fen,
                             final int searchDepth, final ScoreBand expectedScore,
                             final String... acceptedMoves) {
-      this(name, category, fen, searchDepth, expectedScore, List.of(acceptedMoves));
+      this(name, category, fen, List.of(), searchDepth, expectedScore, List.of(acceptedMoves));
+    }
+
+    /**
+     * Constructs a position with moves to replay before the search, whose accepted moves are given
+     * one after another.
+     *
+     * @param name The tactic the position illustrates.
+     * @param category The kind of position this is, which the report is grouped by.
+     * @param fen The Forsyth-Edwards Notation string describing the position.
+     * @param setupMoves The moves replayed onto the position before the search, in long algebraic
+     *        notation.
+     * @param searchDepth The depth this position is searched to when no override is given.
+     * @param expectedScore The root scores this position accepts, from the point of view of the
+     *        side to move.
+     * @param acceptedMoves The winning moves, in long algebraic notation.
+     */
+    public TacticalPosition(final String name, final Category category, final String fen,
+                            final List<String> setupMoves, final int searchDepth,
+                            final ScoreBand expectedScore, final String... acceptedMoves) {
+      this(name, category, fen, setupMoves, searchDepth, expectedScore, List.of(acceptedMoves));
     }
 
     /**
