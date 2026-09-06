@@ -156,12 +156,21 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    *                           and zero on a file holding no pawn.
    * @param filesByRank The files holding a pawn on each rank, indexed by rank, as one bit per
    *                    file.
+   * @param attackCountBySquare The number of the player's pawns bearing on each tile, indexed by
+   *                            tile.
+   * @param lightSquareCount The number of the player's pawns whose rank and file sum to an even
+   *                         number.
+   * @param darkSquareCount The number of the player's pawns whose rank and file sum to an odd
+   *                        number.
    */
   private record PawnStructure(int[] positions,
                                long occupancy,
                                int[] countByFile,
                                int[] rearmostRankByFile,
-                               int[] filesByRank) {
+                               int[] filesByRank,
+                               int[] attackCountBySquare,
+                               int lightSquareCount,
+                               int darkSquareCount) {
 
     /**
      * Reports whether one of these pawns stands on the given tile.
@@ -196,7 +205,11 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     final int[] countByFile = new int[8];
     final int[] rearmostRankByFile = new int[8];
     final int[] filesByRank = new int[8];
+    final int[] attackCountBySquare = new int[BoardUtils.NUM_TILES];
+    final int attackedRankStep = alliance.isWhite() ? -1 : 1;
     long occupancy = 0L;
+    int lightSquareCount = 0;
+    int darkSquareCount = 0;
     int index = 0;
 
     for (final Piece piece : playerPieces) {
@@ -212,6 +225,24 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       occupancy |= 1L << position;
       filesByRank[rank] |= 1 << file;
 
+      if ((rank + file) % 2 == 0) {
+        lightSquareCount++;
+      } else {
+        darkSquareCount++;
+      }
+
+      final int attackedRank = rank + attackedRankStep;
+
+      if (attackedRank >= 0 && attackedRank < 8) {
+        if (file > 0) {
+          attackCountBySquare[(attackedRank * 8) + (file - 1)]++;
+        }
+
+        if (file < 7) {
+          attackCountBySquare[(attackedRank * 8) + (file + 1)]++;
+        }
+      }
+
       if (countByFile[file] == 0) {
         rearmostRankByFile[file] = rank;
       } else if (alliance.isWhite()) {
@@ -223,7 +254,8 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
       countByFile[file]++;
     }
 
-    return new PawnStructure(positions, occupancy, countByFile, rearmostRankByFile, filesByRank);
+    return new PawnStructure(positions, occupancy, countByFile, rearmostRankByFile, filesByRank,
+            attackCountBySquare, lightSquareCount, darkSquareCount);
   }
 
   /**
@@ -600,7 +632,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     pawnStructureScore += evaluateIsolatedPawns(playerPawns, opponentPawns);
     pawnStructureScore += evaluateBackwardPawns(playerPawns, opponentPawns, player.getAlliance());
     pawnStructureScore += evaluatePawnChains(playerPawns, player.getAlliance());
-    pawnStructureScore += evaluateCentralPawnControl(playerPawns, player.getAlliance());
+    pawnStructureScore += evaluateCentralPawnControl(playerPawns);
 
     return pawnStructureScore;
   }
@@ -960,53 +992,22 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
    * Evaluates central pawn control, which is important in the middlegame.
    *
    * @param playerPawns The structure of the player's pawns.
-   * @param alliance The alliance of the pawns.
    * @return The central pawn control evaluation score.
    */
-  private double evaluateCentralPawnControl(final PawnStructure playerPawns,
-                                            final Alliance alliance) {
+  private double evaluateCentralPawnControl(final PawnStructure playerPawns) {
     double centralControlScore = 0;
     final int[] centralSquares = {27, 28, 35, 36};
+    final int[] attackCountBySquare = playerPawns.attackCountBySquare();
 
-    for (final int pawnPosition : playerPawns.positions()) {
-      for (final int centralSquare : centralSquares) {
-        if (pawnPosition == centralSquare) {
-          centralControlScore += 25;
-        }
+    for (final int centralSquare : centralSquares) {
+      if (playerPawns.hasPawnAt(centralSquare)) {
+        centralControlScore += 25;
       }
 
-      for (final int centralSquare : centralSquares) {
-        if (pawnControlsSquare(pawnPosition, alliance, centralSquare)) {
-          centralControlScore += 15;
-        }
-      }
+      centralControlScore += attackCountBySquare[centralSquare] * 15;
     }
 
     return centralControlScore;
-  }
-
-  /**
-   * Checks if a pawn controls (attacks) a specific square.
-   *
-   * @param pawnPosition The tile holding the pawn.
-   * @param alliance The alliance of the pawn.
-   * @param square The square to check for control.
-   * @return True if the pawn controls the square, false otherwise.
-   */
-  private boolean pawnControlsSquare(final int pawnPosition, final Alliance alliance,
-                                     final int square) {
-    final int pawnFile = pawnPosition % 8;
-    final int pawnRank = pawnPosition / 8;
-    final int squareFile = square % 8;
-    final int squareRank = square / 8;
-
-    if (alliance.isWhite()) {
-      return (pawnRank - 1 == squareRank) &&
-              (pawnFile - 1 == squareFile || pawnFile + 1 == squareFile);
-    } else {
-      return (pawnRank + 1 == squareRank) &&
-              (pawnFile - 1 == squareFile || pawnFile + 1 == squareFile);
-    }
   }
 
   /**
@@ -1170,29 +1171,18 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
         final int file = position % 8;
         final int rank = position / 8;
         final Alliance alliance = piece.getPieceAllegiance();
-        final Alliance opponentAlliance = alliance.isWhite() ? Alliance.BLACK : Alliance.WHITE;
 
         boolean inOpponentTerritory = (alliance.isWhite() && rank < 4) ||
                 (!alliance.isWhite() && rank > 3);
 
         if (inOpponentTerritory) {
-          boolean canBeAttackedByPawn = false;
-
-          for (final int opponentPawnPosition : opponentPawns.positions()) {
-            if (pawnControlsSquare(opponentPawnPosition, opponentAlliance, position)) {
-              canBeAttackedByPawn = true;
-              break;
-            }
-          }
+          boolean canBeAttackedByPawn = opponentPawns.attackCountBySquare()[position] > 0;
 
           if (!canBeAttackedByPawn) {
             outpostScore += 20;
 
-            for (final int playerPawnPosition : playerPawns.positions()) {
-              if (pawnControlsSquare(playerPawnPosition, alliance, position)) {
-                outpostScore += 15;
-                break;
-              }
+            if (playerPawns.attackCountBySquare()[position] > 0) {
+              outpostScore += 15;
             }
 
             if (file >= 2 && file <= 5) {
@@ -1558,16 +1548,7 @@ public class MiddlegameBoardEvaluator implements BoardEvaluator {
     final int position = piece.getPiecePosition();
     final boolean isLightSquare = ((position / 8) + (position % 8)) % 2 == 0;
 
-    int pawnsOnSameColor = 0;
-
-    for (final int pawnPosition : playerPawns.positions()) {
-      final boolean isPawnOnLightSquare = ((pawnPosition / 8) + (pawnPosition % 8)) % 2 == 0;
-
-      if (isLightSquare == isPawnOnLightSquare) {
-        pawnsOnSameColor++;
-      }
-    }
-    return pawnsOnSameColor;
+    return isLightSquare ? playerPawns.lightSquareCount() : playerPawns.darkSquareCount();
   }
 
   /**
